@@ -1,4 +1,5 @@
 import { canAfford, debit } from "../economy/gold.js";
+import { getMinIncrement } from "./bidIncrement.js";
 import { Player } from "../types.js";
 
 export type AuctionPhase = "visible" | "flicker" | "ended";
@@ -115,8 +116,9 @@ export class AuctionRoom {
     if (this.phase === "ended") {
       return { accepted: false, reason: "Auction has already ended." };
     }
-    if (amount <= this.currentPrice) {
-      return { accepted: false, reason: "Bid must be higher than the current price." };
+    const minAllowed = this.currentPrice + getMinIncrement(this.currentPrice);
+    if (amount < minAllowed) {
+      return { accepted: false, reason: `Bid must be at least ${minAllowed}g.` };
     }
     if (!canAfford(player, amount)) {
       return { accepted: false, reason: "Not enough gold." };

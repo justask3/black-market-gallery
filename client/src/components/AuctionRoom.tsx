@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { useSession } from "../SessionContext";
 import { fetchAuctionState } from "../api";
 import { AuctionPublicState } from "../types";
+import { getMinIncrement } from "../bidIncrement";
 
 function useCountdown(targetMs: number | null | undefined) {
   const [remaining, setRemaining] = useState<number | null>(null);
@@ -98,16 +99,22 @@ export default function AuctionRoom() {
     setJoined(true);
   };
 
-  const placeBid = () => {
-    const amount = Number(bidAmount);
+  const placeBid = (amount: number) => {
     if (!amount || !socket) return;
     socket.emit("auction:bid", { amount });
     setBidAmount("");
   };
 
+  const placeCustomBid = () => {
+    placeBid(Number(bidAmount));
+  };
+
   if (!state?.active) {
     return <p className="max-w-md mx-auto mt-10 text-center text-gray-500">No active auction right now.</p>;
   }
+
+  const minIncrement = getMinIncrement(state.currentPrice ?? 0);
+  const quickBidAmount = (state.currentPrice ?? 0) + minIncrement;
 
   return (
     <div className="max-w-md mx-auto mt-10 space-y-4">
@@ -135,16 +142,28 @@ export default function AuctionRoom() {
       )}
 
       {joined && state.phase !== "ended" && (
-        <div className="flex gap-2">
-          <input
-            className="border rounded px-3 py-2 flex-1"
-            placeholder="Bid amount"
-            value={bidAmount}
-            onChange={(e) => setBidAmount(e.target.value)}
-          />
-          <button className="bg-gray-800 text-white rounded px-4" onClick={placeBid}>
-            Bid
+        <div className="space-y-2">
+          <button
+            className="bg-gray-800 text-white rounded px-4 py-2 w-full"
+            onClick={() => placeBid(quickBidAmount)}
+          >
+            Bid {quickBidAmount}g (+{minIncrement})
           </button>
+
+          <div className="flex gap-2">
+            <input
+              type="number"
+              min={quickBidAmount}
+              step={minIncrement}
+              className="border rounded px-3 py-2 flex-1"
+              placeholder={`Custom amount (min ${quickBidAmount}g)`}
+              value={bidAmount}
+              onChange={(e) => setBidAmount(e.target.value)}
+            />
+            <button className="bg-gray-600 text-white rounded px-4" onClick={placeCustomBid}>
+              Bid Custom
+            </button>
+          </div>
         </div>
       )}
 
