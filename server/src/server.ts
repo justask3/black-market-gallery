@@ -32,13 +32,11 @@ app.use(catalogRouter);
 
 registerSocketHandlers(io, auctionManager);
 
-// One-time bootstrap: since starting a round normally requires owning a
-// Chest to relist, and no player begins the game with one, the server
-// seeds the very first auction itself on boot (Option A, confirmed).
-// After this, every subsequent round is started by a player relisting
-// a Chest they won -- this seed only ever runs once, at startup.
-const SEED_STARTING_PRICE = 500;
-auctionManager.startNewChestAuction(SEED_STARTING_PRICE);
+// Starts every tier's automated spawn scheduler (Common Block, Rare Vault,
+// Exotic Showcase) -- the server itself is now the primary driver of
+// auction supply. Players can additionally feed the Common Block tier via
+// POST /items/:id/relist, but no round depends on that anymore.
+auctionManager.bootstrap();
 
 httpServer.listen(PORT, () => {
   console.log(`Black Market Gallery server listening on http://localhost:${PORT}`);

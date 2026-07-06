@@ -29,38 +29,38 @@ export function registerSocketHandlers(io: SocketIOServer, auctionManager: Aucti
     // hits, Sigil blocks) regardless of which auction room they're in.
     socket.join(`player:${player.id}`);
 
-    socket.on("auction:join", ({ mode }: { mode: "public" | "anonymous" }) => {
-      const result = auctionManager.joinRoom(player, mode);
+    socket.on("auction:join", ({ roomId, mode }: { roomId: string; mode: "public" | "anonymous" }) => {
+      const result = auctionManager.joinRoom(player, roomId, mode);
       if (!result.joined) {
-        socket.emit("auction:joinRejected", { reason: result.reason });
+        socket.emit("auction:joinRejected", { roomId, reason: result.reason });
         return;
       }
-      const room = auctionManager.getRoom()!;
+      const room = auctionManager.getRoom(roomId)!;
       socket.join(room.id);
       io.to(room.id).emit("auction:state", room.getPublicState());
     });
 
-    socket.on("auction:bid", ({ amount }: { amount: number }) => {
-      const room = auctionManager.getRoom();
+    socket.on("auction:bid", ({ roomId, amount }: { roomId: string; amount: number }) => {
+      const room = auctionManager.getRoom(roomId);
       if (!room) {
-        socket.emit("auction:bidRejected", { reason: "No active auction." });
+        socket.emit("auction:bidRejected", { roomId, reason: "Room not found or auction already ended." });
         return;
       }
       const result = room.placeBid(player, amount);
       if (!result.accepted) {
-        socket.emit("auction:bidRejected", { reason: result.reason });
+        socket.emit("auction:bidRejected", { roomId, reason: result.reason });
         return;
       }
       const participant = room.participants.get(player.id);
       io.to(room.id).emit("auction:bidPlaced", {
+        roomId,
         amount,
         bidderDisplay: participant?.displayName ?? "Unknown",
       });
     });
 
-    socket.on("auction:leave", () => {
-      const room = auctionManager.getRoom();
-      if (room) socket.leave(room.id);
+    socket.on("auction:leave", ({ roomId }: { roomId: string }) => {
+      socket.leave(roomId);
     });
 
     socket.on(
@@ -81,11 +81,8 @@ export function registerSocketHandlers(io: SocketIOServer, auctionManager: Aucti
           return;
         }
 
-        const room = auctionManager.getRoom();
-        const isRoomScopedAttack =
-          !!room && room.participants.has(player.id) && room.participants.has(target.id);
-        const attackerIsAnonymousInThisRoom =
-          isRoomScopedAttack && room!.isAnonymous(player.id);
+        const sharedRoom = auctionManager.findSharedRoom(player.id, target.id);
+        const attackerIsAnonymousInThisRoom = !!sharedRoom && sharedRoom.isAnonymous(player.id);
 
         const targetInventory = getInventory(target.id);
         const result = resolveDaggerAttack(player, target, daggerItem, targetInventory, {

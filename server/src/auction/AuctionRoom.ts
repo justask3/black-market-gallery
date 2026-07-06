@@ -4,10 +4,6 @@ import { Player } from "../types.js";
 
 export type AuctionPhase = "visible" | "flicker" | "ended";
 
-const VISIBLE_PHASE_DURATION_MS = 10 * 60 * 1000; // 10 minutes
-const FLICKER_MIN_MS = 15 * 1000; // 15 seconds
-const FLICKER_MAX_MS = 120 * 1000; // 120 seconds
-
 export interface Participant {
   playerId: string;
   displayName: string; // actual name, or "Anonymous" for display purposes
@@ -42,6 +38,9 @@ export class AuctionRoom {
 
   private phaseTimer: ReturnType<typeof setTimeout> | null = null;
   private visiblePhaseEndsAt: number | null = null;
+  private readonly visibleDurationMs: number;
+  private readonly flickerMinMs: number;
+  private readonly flickerMaxMs: number;
   private onPhaseChange: (phase: AuctionPhase) => void;
   private onEnded: (winnerId: string | null, finalPrice: number) => void;
 
@@ -49,12 +48,18 @@ export class AuctionRoom {
     id: string;
     itemLabel: string;
     startingPrice: number;
+    visibleDurationMs: number;
+    flickerMinMs: number;
+    flickerMaxMs: number;
     onPhaseChange: (phase: AuctionPhase) => void;
     onEnded: (winnerId: string | null, finalPrice: number) => void;
   }) {
     this.id = opts.id;
     this.itemLabel = opts.itemLabel;
     this.currentPrice = opts.startingPrice;
+    this.visibleDurationMs = opts.visibleDurationMs;
+    this.flickerMinMs = opts.flickerMinMs;
+    this.flickerMaxMs = opts.flickerMaxMs;
     this.onPhaseChange = opts.onPhaseChange;
     this.onEnded = opts.onEnded;
   }
@@ -62,8 +67,8 @@ export class AuctionRoom {
   /** Starts the visible phase timer. Call this once, when the room is created. */
   start(): void {
     this.phase = "visible";
-    this.visiblePhaseEndsAt = Date.now() + VISIBLE_PHASE_DURATION_MS;
-    this.phaseTimer = setTimeout(() => this.beginFlicker(), VISIBLE_PHASE_DURATION_MS);
+    this.visiblePhaseEndsAt = Date.now() + this.visibleDurationMs;
+    this.phaseTimer = setTimeout(() => this.beginFlicker(), this.visibleDurationMs);
   }
 
   private beginFlicker(): void {
@@ -73,7 +78,7 @@ export class AuctionRoom {
     // The random duration is rolled here, once, and lives only in this
     // closure/timer — it is never exposed outside this class.
     const randomDurationMs =
-      FLICKER_MIN_MS + Math.random() * (FLICKER_MAX_MS - FLICKER_MIN_MS);
+      this.flickerMinMs + Math.random() * (this.flickerMaxMs - this.flickerMinMs);
 
     this.phaseTimer = setTimeout(() => this.end(), randomDurationMs);
   }

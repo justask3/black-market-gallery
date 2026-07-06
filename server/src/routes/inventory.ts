@@ -151,7 +151,11 @@ export function buildInventoryRouter(auctionManager: AuctionManager): Router {
   });
 
   /**
-   * Relists an unopened Chest into a brand-new Flame Flicker auction.
+   * Relists an unopened Chest by enqueueing it into the Common Block tier's
+   * listing queue -- it no longer starts a room directly. The server's own
+   * schedulers (see auction/tiers.ts, AuctionManager) are the primary
+   * source of new rounds; this queue is drained first whenever a Common
+   * slot needs filling, ahead of the server spawning its own filler room.
    *
    * TODO: The Bleeding Coin catalog copy states it "cannot be listed on
    * a normal auction," but no enforcement exists anywhere yet -- this is
@@ -172,13 +176,9 @@ export function buildInventoryRouter(auctionManager: AuctionManager): Router {
     const chest = inventory.find((i) => i.id === req.params.id && i.itemType === "chest");
     if (!chest) return res.status(404).json({ error: "Chest not found in your inventory." });
 
-    const result = auctionManager.startNewChestAuction(startingPrice);
-    if (!result.started) {
-      return res.status(409).json({ error: result.reason });
-    }
-
+    auctionManager.enqueueCommonListing(startingPrice, player.id);
     removeItem(player.id, chest.id);
-    res.json({ relisted: true });
+    res.json({ queued: true });
   });
 
   return router;

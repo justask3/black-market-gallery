@@ -68,7 +68,7 @@ export default function Inventory() {
     }
     try {
       await relistChest(player.id, item.id, price);
-      setMessage("Chest relisted — head to the Auction Room.");
+      setMessage("Chest queued for auction — it'll go live soon in the Auction Room.");
       refresh();
     } catch (err) {
       setMessage(err instanceof Error ? err.message : "Failed to relist chest.");

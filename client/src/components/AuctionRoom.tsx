@@ -1,8 +1,10 @@
 import { useEffect, useState } from "react";
 import { useSession } from "../SessionContext";
-import { fetchAuctionState } from "../api";
-import { AuctionPublicState } from "../types";
+import { fetchAuctionRooms } from "../api";
+import { AuctionRoomSummary } from "../types";
 import { getMinIncrement } from "../bidIncrement";
+
+const ROOM_LIST_POLL_MS = 15 * 1000;
 
 function useCountdown(targetMs: number | null | undefined) {
   const [remaining, setRemaining] = useState<number | null>(null);
@@ -28,7 +30,9 @@ function formatMs(ms: number): string {
 
 export default function AuctionRoom() {
   const { player, socket } = useSession();
-  const [state, setState] = useState<AuctionPublicState | null>(null);
+  const [rooms, setRooms] = useState<AuctionRoomSummary[]>([]);
+  const [selectedRoomId, setSelectedRoomId] = useState<string | null>(null);
+  const [state, setState] = useState<AuctionRoomSummary | null>(null);
   const [joined, setJoined] = useState(false);
   const [bidAmount, setBidAmount] = useState("");
   const [notice, setNotice] = useState<string | null>(null);
@@ -36,24 +40,57 @@ export default function AuctionRoom() {
 
   const countdown = useCountdown(state?.visiblePhaseEndsAt ?? null);
 
+  const refreshRooms = () => {
+    fetchAuctionRooms()
+      .then(({ rooms }) => setRooms(rooms))
+      .catch(() => {});
+  };
+
+  // Poll the room list only while browsing it (no room selected) — there's
+  // no dedicated "room list changed" socket broadcast in this design.
   useEffect(() => {
-    fetchAuctionState().then(setState).catch(() => {});
-  }, []);
+    if (selectedRoomId !== null) return;
+    refreshRooms();
+    const id = setInterval(refreshRooms, ROOM_LIST_POLL_MS);
+    return () => clearInterval(id);
+  }, [selectedRoomId]);
 
   useEffect(() => {
-    if (!socket) return;
+    if (!socket || selectedRoomId === null) return;
 
-    const onState = (s: AuctionPublicState) => setState({ active: true, ...s });
-    const onPhaseChanged = ({ phase }: { phase: string }) => {
+    const onState = (s: AuctionRoomSummary) => {
+      if (s.id !== selectedRoomId) return;
+      setState(s);
+    };
+    const onPhaseChanged = ({ roomId, phase }: { roomId: string; phase: string }) => {
+      if (roomId !== selectedRoomId) return;
       setState((prev) => (prev ? { ...prev, phase: phase as any } : prev));
       if (phase === "flicker") setNotice("The flame flickers... the auction may end any moment.");
       if (phase === "ended") setNotice("The auction has ended.");
     };
-    const onBidPlaced = ({ amount, bidderDisplay }: { amount: number; bidderDisplay: string }) => {
+    const onBidPlaced = ({
+      roomId,
+      amount,
+      bidderDisplay,
+    }: {
+      roomId: string;
+      amount: number;
+      bidderDisplay: string;
+    }) => {
+      if (roomId !== selectedRoomId) return;
       setState((prev) => (prev ? { ...prev, currentPrice: amount } : prev));
       setNotice(`${bidderDisplay} bid ${amount}g.`);
     };
-    const onEnded = ({ winnerId, finalPrice }: { winnerId: string | null; finalPrice: number }) => {
+    const onEnded = ({
+      roomId,
+      winnerId,
+      finalPrice,
+    }: {
+      roomId: string;
+      winnerId: string | null;
+      finalPrice: number;
+    }) => {
+      if (roomId !== selectedRoomId) return;
       setNotice(
         winnerId
           ? winnerId === player?.id
@@ -62,8 +99,12 @@ export default function AuctionRoom() {
           : "Auction ended with no bids."
       );
     };
-    const onJoinRejected = ({ reason }: { reason: string }) => setNotice(reason);
-    const onBidRejected = ({ reason }: { reason: string }) => setNotice(reason);
+    const onJoinRejected = ({ roomId, reason }: { roomId: string; reason: string }) => {
+      if (roomId === selectedRoomId) setNotice(reason);
+    };
+    const onBidRejected = ({ roomId, reason }: { roomId: string; reason: string }) => {
+      if (roomId === selectedRoomId) setNotice(reason);
+    };
     const onNotification = (n: { type: string; amountStolen: number; attackerId: string | null }) => {
       const msg =
         n.type === "dagger_blocked"
@@ -91,17 +132,34 @@ export default function AuctionRoom() {
       socket.off("auction:bidRejected", onBidRejected);
       socket.off("player:notification", onNotification);
     };
-  }, [socket, player?.id]);
+  }, [socket, player?.id, selectedRoomId]);
+
+  const selectRoom = (room: AuctionRoomSummary) => {
+    setState(room);
+    setSelectedRoomId(room.id);
+    setJoined(false);
+    setNotice(null);
+    setBidAmount("");
+  };
+
+  const backToList = () => {
+    if (socket && selectedRoomId) socket.emit("auction:leave", { roomId: selectedRoomId });
+    setSelectedRoomId(null);
+    setState(null);
+    setJoined(false);
+    setNotice(null);
+    refreshRooms();
+  };
 
   const join = (mode: "public" | "anonymous") => {
-    if (!socket) return;
-    socket.emit("auction:join", { mode });
+    if (!socket || !selectedRoomId) return;
+    socket.emit("auction:join", { roomId: selectedRoomId, mode });
     setJoined(true);
   };
 
   const placeBid = (amount: number) => {
-    if (!amount || !socket) return;
-    socket.emit("auction:bid", { amount });
+    if (!amount || !socket || !selectedRoomId) return;
+    socket.emit("auction:bid", { roomId: selectedRoomId, amount });
     setBidAmount("");
   };
 
@@ -109,8 +167,36 @@ export default function AuctionRoom() {
     placeBid(Number(bidAmount));
   };
 
-  if (!state?.active) {
-    return <p className="max-w-md mx-auto mt-10 text-center text-gray-500">No active auction right now.</p>;
+  if (selectedRoomId === null || !state) {
+    return (
+      <div className="max-w-lg mx-auto mt-10 space-y-4">
+        <h2 className="text-xl font-bold">Live Auctions</h2>
+        {rooms.length === 0 && (
+          <p className="text-center text-gray-500">No active auctions right now. Check back soon.</p>
+        )}
+        <div className="space-y-3">
+          {rooms.map((room) => (
+            <button
+              key={room.id}
+              onClick={() => selectRoom(room)}
+              className="w-full text-left border rounded p-4 bg-white hover:bg-gray-50"
+            >
+              <div className="flex justify-between items-center">
+                <span className="font-semibold">{room.tierLabel}</span>
+                <span className="text-sm text-gray-500 capitalize">{room.phase}</span>
+              </div>
+              <p className="text-sm text-gray-600 mt-1">{room.itemLabel}</p>
+              <div className="flex justify-between items-center mt-2">
+                <span className="text-lg font-bold">{room.currentPrice}g</span>
+                <span className="text-sm text-gray-500">
+                  {room.participants.length} participant{room.participants.length === 1 ? "" : "s"}
+                </span>
+              </div>
+            </button>
+          ))}
+        </div>
+      </div>
+    );
   }
 
   const minIncrement = getMinIncrement(state.currentPrice ?? 0);
@@ -118,8 +204,14 @@ export default function AuctionRoom() {
 
   return (
     <div className="max-w-md mx-auto mt-10 space-y-4">
+      <button className="text-sm text-gray-500 hover:underline" onClick={backToList}>
+        ← Back to live auctions
+      </button>
+
       <h2 className="text-xl font-bold">{state.itemLabel}</h2>
-      <p className="text-sm text-gray-500 capitalize">Phase: {state.phase}</p>
+      <p className="text-sm text-gray-500">
+        {state.tierLabel} · <span className="capitalize">{state.phase}</span>
+      </p>
 
       {state.phase === "visible" && countdown !== null && (
         <p className="text-lg font-mono">{formatMs(countdown)}</p>
@@ -133,10 +225,10 @@ export default function AuctionRoom() {
       {!joined && state.phase !== "ended" && (
         <div className="space-x-2">
           <button className="bg-gray-800 text-white rounded px-4 py-2" onClick={() => join("public")}>
-            Join (500g, public)
+            Join ({state.entryFeePublic}g, public)
           </button>
           <button className="bg-gray-600 text-white rounded px-4 py-2" onClick={() => join("anonymous")}>
-            Join Anonymously (1500g)
+            Join Anonymously ({state.entryFeeAnonymous}g)
           </button>
         </div>
       )}

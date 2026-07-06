@@ -1,4 +1,4 @@
-import { Player, InventoryItem, AuctionPublicState, AttackLogEntry, CatalogItem } from "./types";
+import { Player, InventoryItem, AuctionRoomSummary, AttackLogEntry, CatalogItem } from "./types";
 
 const API_BASE = "http://localhost:3001";
 
@@ -46,7 +46,7 @@ export function openChest(playerId: string, itemId: string) {
 }
 
 export function relistChest(playerId: string, itemId: string, startingPrice: number) {
-  return request<{ relisted: boolean }>(`/items/${itemId}/relist`, playerId, {
+  return request<{ queued: boolean }>(`/items/${itemId}/relist`, playerId, {
     method: "POST",
     body: JSON.stringify({ startingPrice }),
   });
@@ -62,8 +62,8 @@ export function undisplayPainting(playerId: string, itemId: string) {
   });
 }
 
-export function fetchAuctionState() {
-  return request<AuctionPublicState>("/auction", null);
+export function fetchAuctionRooms() {
+  return request<{ rooms: AuctionRoomSummary[] }>("/auction", null);
 }
 
 export function fetchAttackLog(playerId: string) {

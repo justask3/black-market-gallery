@@ -29,14 +29,19 @@ export interface Player {
 
 export type AuctionPhase = "visible" | "flicker" | "ended";
 
-export interface AuctionPublicState {
-  active: boolean;
-  id?: string;
-  itemLabel?: string;
-  phase?: AuctionPhase;
-  currentPrice?: number;
-  visiblePhaseEndsAt?: number | null;
-  participants?: { displayName: string }[];
+export type AuctionTierId = "common" | "rare" | "exotic";
+
+export interface AuctionRoomSummary {
+  tierId: AuctionTierId;
+  tierLabel: string;
+  entryFeePublic: number;
+  entryFeeAnonymous: number;
+  id: string;
+  itemLabel: string;
+  phase: AuctionPhase;
+  currentPrice: number;
+  visiblePhaseEndsAt: number | null;
+  participants: { displayName: string }[];
 }
 
 export interface CatalogItem {
