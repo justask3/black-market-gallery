@@ -2,6 +2,7 @@ import { Router } from "express";
 import { requirePlayer } from "./middleware.js";
 import { getInventory, getPlayer, addItem, removeItem } from "../db/store.js";
 import { collectPaintingIncome, MAX_DISPLAYED_PAINTINGS } from "../items/painting.js";
+import { collectBleedingCoinDrain } from "../items/bleedingCoin.js";
 import { rollChestLoot } from "../items/chest.js";
 import { DaggerMetadata, PaintingMetadata, InventoryItem } from "../types.js";
 import { AuctionManager } from "../auction/AuctionManager.js";
@@ -25,6 +26,27 @@ function collectDisplayedPaintingIncome(playerId: string): void {
   }
 }
 
+/**
+ * Runs lazy drain collection for every Bleeding Coin a player holds.
+ * Sorted by createdAt (acquisition order) so that when a player holds
+ * multiple coins, each one's elapsed ticks are applied fully, in
+ * sequence, before the next coin's ticks run -- this produces the
+ * confirmed "Reading 1" sequential-compounding behavior rather than
+ * all coins draining off the same starting balance independently.
+ */
+function collectAllBleedingCoinDrain(playerId: string): void {
+  const player = getPlayer(playerId);
+  if (!player) return;
+
+  const coins = getInventory(playerId)
+    .filter((item) => item.itemType === "bleeding_coin")
+    .sort((a, b) => a.createdAt - b.createdAt);
+
+  for (const coin of coins) {
+    collectBleedingCoinDrain(coin, player);
+  }
+}
+
 export function buildInventoryRouter(auctionManager: AuctionManager): Router {
   const router = Router();
 
@@ -32,6 +54,7 @@ export function buildInventoryRouter(auctionManager: AuctionManager): Router {
   router.get("/inventory", requirePlayer, (req, res) => {
     const player = req.player!;
     collectDisplayedPaintingIncome(player.id);
+    collectAllBleedingCoinDrain(player.id);
     const inventory = getInventory(player.id);
     res.json({ gold: player.gold, inventory });
   });
@@ -127,7 +150,16 @@ export function buildInventoryRouter(auctionManager: AuctionManager): Router {
     res.json({ result: "item", itemType: loot.itemType, item: newItem });
   });
 
-  /** Relists an unopened Chest into a brand-new Flame Flicker auction. */
+  /**
+   * Relists an unopened Chest into a brand-new Flame Flicker auction.
+   *
+   * TODO: The Bleeding Coin catalog copy states it "cannot be listed on
+   * a normal auction," but no enforcement exists anywhere yet -- this is
+   * the only relist/listing route in the codebase today, and it's
+   * hard-scoped to itemType === "chest" already, so a coin can't reach
+   * it as things stand. If a generic (non-chest) listing route is added
+   * later, it must explicitly reject itemType === "bleeding_coin" there.
+   */
   router.post("/items/:id/relist", requirePlayer, (req, res) => {
     const player = req.player!;
     const { startingPrice } = req.body ?? {};

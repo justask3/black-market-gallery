@@ -1,4 +1,4 @@
-import { Player, InventoryItem, AuctionPublicState, AttackLogEntry } from "./types";
+import { Player, InventoryItem, AuctionPublicState, AttackLogEntry, CatalogItem } from "./types";
 
 const API_BASE = "http://localhost:3001";
 
@@ -68,4 +68,8 @@ export function fetchAuctionState() {
 
 export function fetchAttackLog(playerId: string) {
   return request<{ entries: AttackLogEntry[] }>("/attack-log", playerId);
+}
+
+export function fetchCatalog() {
+  return request<{ items: CatalogItem[] }>("/catalog", null);
 }

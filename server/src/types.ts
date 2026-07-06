@@ -4,7 +4,7 @@
 
 export const DEBT_FLOOR = -1000;
 
-export type ItemType = "chest" | "painting" | "sigil" | "dagger";
+export type ItemType = "chest" | "painting" | "sigil" | "dagger" | "bleeding_coin";
 
 export interface DaggerMetadata {
   chargesRemaining: number; // starts at 2, decrements on use, never removed from inventory
@@ -15,7 +15,15 @@ export interface PaintingMetadata {
   displayed: boolean; // only displayed Paintings (max 2) accrue income
 }
 
-export type ItemMetadata = DaggerMetadata | PaintingMetadata | Record<string, never>;
+export interface BleedingCoinMetadata {
+  lastDrained: number; // epoch ms; used for lazy drain calculation, same pattern as Painting
+}
+
+export type ItemMetadata =
+  | DaggerMetadata
+  | PaintingMetadata
+  | BleedingCoinMetadata
+  | Record<string, never>;
 
 export interface InventoryItem {
   id: string;

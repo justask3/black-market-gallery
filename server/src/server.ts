@@ -6,6 +6,7 @@ import { authRouter } from "./routes/auth.js";
 import { buildInventoryRouter } from "./routes/inventory.js";
 import { buildAuctionRouter } from "./routes/auction.js";
 import { attackLogRouter } from "./routes/attackLog.js";
+import { catalogRouter } from "./routes/catalog.js";
 import { AuctionManager } from "./auction/AuctionManager.js";
 import { registerSocketHandlers } from "./sockets/socketHandlers.js";
 
@@ -27,6 +28,7 @@ app.use(authRouter);
 app.use(buildInventoryRouter(auctionManager));
 app.use(buildAuctionRouter(auctionManager));
 app.use(attackLogRouter);
+app.use(catalogRouter);
 
 registerSocketHandlers(io, auctionManager);
 

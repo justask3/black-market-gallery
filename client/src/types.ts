@@ -1,4 +1,4 @@
-export type ItemType = "chest" | "painting" | "sigil" | "dagger";
+export type ItemType = "chest" | "painting" | "sigil" | "dagger" | "bleeding_coin";
 
 export interface DaggerMetadata {
   chargesRemaining: number;
@@ -9,11 +9,15 @@ export interface PaintingMetadata {
   displayed: boolean;
 }
 
+export interface BleedingCoinMetadata {
+  lastDrained: number;
+}
+
 export interface InventoryItem {
   id: string;
   ownerId: string;
   itemType: ItemType;
-  metadata: DaggerMetadata | PaintingMetadata | Record<string, never>;
+  metadata: DaggerMetadata | PaintingMetadata | BleedingCoinMetadata | Record<string, never>;
   createdAt: number;
 }
 
@@ -33,6 +37,12 @@ export interface AuctionPublicState {
   currentPrice?: number;
   visiblePhaseEndsAt?: number | null;
   participants?: { displayName: string }[];
+}
+
+export interface CatalogItem {
+  itemType: string;
+  name: string;
+  description: string;
 }
 
 export interface AttackLogEntry {

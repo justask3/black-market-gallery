@@ -162,6 +162,13 @@ export default function Inventory() {
               </p>
             )}
 
+            {item.itemType === "bleeding_coin" && (
+              <p className="text-sm text-red-700 mt-2">
+                Cursed — silently draining your gold every 10 minutes. Cannot be discarded or
+                listed on a normal auction.
+              </p>
+            )}
+
             {item.itemType === "dagger" && (
               <div className="mt-2 space-y-2">
                 <p className="text-sm text-gray-500">
