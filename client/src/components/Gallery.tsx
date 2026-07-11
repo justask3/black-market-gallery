@@ -43,9 +43,9 @@ export default function Gallery() {
       {galleries.length === 0 ? (
         <p className="text-gray-400 text-sm">No one has anything on display right now.</p>
       ) : (
-        <ul className="space-y-2">
+        <ul className="space-y-4">
           {galleries.map((g) => (
-            <li key={g.playerId} className="border rounded p-4 bg-white space-y-2">
+            <li key={g.playerId} className="space-y-2">
               <p className="font-semibold">{g.playerName}'s Gallery</p>
               {/* Placeholder swatch in the painting's block color until real artwork exists. */}
               <div className="grid grid-cols-3 sm:grid-cols-4 gap-2">
