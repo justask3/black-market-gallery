@@ -14,6 +14,7 @@ export const inventories = new Map<string, InventoryItem[]>(); // keyed by playe
 export const attackLogs: AttackLogEntry[] = [];
 export const conversations = new Map<string, DirectMessage[]>(); // keyed by sorted "idA:idB"
 export const auctionHistory: AuctionHistoryEntry[] = [];
+const playerIdByName = new Map<string, string>(); // keyed by lowercased name, for name-only login lookup
 
 export const STARTING_GOLD = 10000;
 
@@ -26,11 +27,18 @@ export function createPlayer(name: string, isAdmin: boolean = false): Player {
   };
   players.set(player.id, player);
   inventories.set(player.id, []);
+  playerIdByName.set(name.toLowerCase(), player.id);
   return player;
 }
 
 export function getPlayer(id: string): Player | undefined {
   return players.get(id);
+}
+
+/** Case-insensitive lookup by display name -- backs name-only login (no password, no dedup by anything else). */
+export function getPlayerByName(name: string): Player | undefined {
+  const id = playerIdByName.get(name.toLowerCase());
+  return id ? players.get(id) : undefined;
 }
 
 export function getInventory(playerId: string): InventoryItem[] {
