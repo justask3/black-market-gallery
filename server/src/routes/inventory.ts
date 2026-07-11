@@ -1,6 +1,6 @@
 import { Router } from "express";
 import { requirePlayer } from "./middleware.js";
-import { getInventory, getPlayer, addItem, removeItem } from "../db/store.js";
+import { getInventory, getPlayer, addItem, removeItem, players } from "../db/store.js";
 import { collectPaintingIncome, MAX_DISPLAYED_PAINTINGS } from "../items/painting.js";
 import { collectBleedingCoinDrain } from "../items/bleedingCoin.js";
 import { rollChestLoot, chestTierFor } from "../items/chest.js";
@@ -57,6 +57,27 @@ export function buildInventoryRouter(auctionManager: AuctionManager): Router {
     collectAllBleedingCoinDrain(player.id);
     const inventory = getInventory(player.id);
     res.json({ gold: player.gold, inventory });
+  });
+
+  /**
+   * Public: the game-wide gallery feed -- every player who currently has at
+   * least one Painting on display, across the whole game. Players with
+   * nothing displayed are omitted rather than listed empty.
+   */
+  router.get("/gallery", (req, res) => {
+    const galleries: { playerId: string; playerName: string; paintings: InventoryItem[] }[] = [];
+
+    for (const player of players.values()) {
+      collectDisplayedPaintingIncome(player.id);
+      const displayedPaintings = getInventory(player.id).filter(
+        (item) => item.itemType === "painting" && (item.metadata as PaintingMetadata).displayed
+      );
+      if (displayedPaintings.length > 0) {
+        galleries.push({ playerId: player.id, playerName: player.name, paintings: displayedPaintings });
+      }
+    }
+
+    res.json({ galleries });
   });
 
   /** Public: any visitor can see another player's DISPLAYED Paintings only. */

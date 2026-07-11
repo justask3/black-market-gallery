@@ -46,6 +46,13 @@ export function fetchGallery(targetPlayerId: string) {
   );
 }
 
+export function fetchPublicGallery() {
+  return request<{ galleries: { playerId: string; playerName: string; paintings: InventoryItem[] }[] }>(
+    "/gallery",
+    null
+  );
+}
+
 export function openChest(playerId: string, itemId: string) {
   return request<{ result: "gold" | "item"; amount?: number; itemType?: string }>(
     `/items/${itemId}/open`,

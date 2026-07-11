@@ -1,71 +1,56 @@
-import { useState } from "react";
-import { useSession } from "../SessionContext";
-import { fetchGallery } from "../api";
-import { InventoryItem } from "../types";
+import { useEffect, useState } from "react";
+import { fetchPublicGallery } from "../api";
+
+const REFRESH_POLL_MS = 60 * 1000;
+
+interface GalleryEntry {
+  playerId: string;
+  playerName: string;
+  paintings: unknown[];
+}
 
 export default function Gallery() {
-  const { player } = useSession();
-  const [targetId, setTargetId] = useState("");
-  const [result, setResult] = useState<{ playerName: string; paintings: InventoryItem[] } | null>(
-    null
-  );
+  const [galleries, setGalleries] = useState<GalleryEntry[]>([]);
   const [error, setError] = useState<string | null>(null);
 
-  const lookup = async (id: string) => {
-    setError(null);
-    try {
-      const data = await fetchGallery(id);
-      setResult(data);
-    } catch (err) {
-      setResult(null);
-      setError(err instanceof Error ? err.message : "Gallery not found.");
-    }
+  const refresh = () => {
+    fetchPublicGallery()
+      .then((data) => {
+        setGalleries(data.galleries);
+        setError(null);
+      })
+      .catch((err) => setError(err instanceof Error ? err.message : "Failed to load the gallery."));
   };
+
+  useEffect(() => {
+    refresh();
+    const id = setInterval(refresh, REFRESH_POLL_MS);
+    return () => clearInterval(id);
+  }, []);
 
   return (
     <div className="max-w-md mx-auto mt-10 space-y-4">
       <h2 className="text-xl font-bold">Gallery</h2>
       <p className="text-sm text-gray-500">
-        Only a player's currently displayed Paintings are visible here — the rest of their
-        inventory stays private.
+        A public space — every player's currently displayed Masterpiece Paintings. The rest of
+        everyone's inventory stays private.
       </p>
-
-      <div className="flex gap-2">
-        <input
-          className="border rounded px-3 py-2 flex-1"
-          placeholder="Player ID to view"
-          value={targetId}
-          onChange={(e) => setTargetId(e.target.value)}
-        />
-        <button
-          className="bg-gray-800 text-white rounded px-4"
-          onClick={() => lookup(targetId.trim())}
-        >
-          View
-        </button>
-      </div>
-
-      {player && (
-        <button className="text-sm text-blue-600 underline" onClick={() => lookup(player.id)}>
-          View my own gallery
-        </button>
-      )}
 
       {error && <p className="text-red-600 text-sm">{error}</p>}
 
-      {result && (
-        <div className="border rounded p-4 bg-white">
-          <p className="font-semibold">{result.playerName}'s Gallery</p>
-          {result.paintings.length === 0 ? (
-            <p className="text-gray-400 text-sm mt-2">No Paintings currently on display.</p>
-          ) : (
-            <ul className="mt-2 space-y-1 text-sm">
-              {result.paintings.map((p) => (
-                <li key={p.id}>A Masterpiece Painting, proudly displayed.</li>
-              ))}
-            </ul>
-          )}
-        </div>
+      {galleries.length === 0 ? (
+        <p className="text-gray-400 text-sm">No one has anything on display right now.</p>
+      ) : (
+        <ul className="space-y-2">
+          {galleries.map((g) => (
+            <li key={g.playerId} className="border rounded p-4 bg-white">
+              <p className="font-semibold">{g.playerName}'s Gallery</p>
+              <p className="text-sm text-gray-600 mt-1">
+                {g.paintings.length} Masterpiece Painting{g.paintings.length === 1 ? "" : "s"} on display.
+              </p>
+            </li>
+          ))}
+        </ul>
       )}
     </div>
   );

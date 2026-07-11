@@ -1,14 +1,7 @@
 import { useEffect, useState, useCallback } from "react";
 import { useSession } from "../SessionContext";
-import {
-  fetchInventory,
-  openChest,
-  relistChest,
-  displayPainting,
-  undisplayPainting,
-  fetchAttackLog,
-} from "../api";
-import { InventoryItem, ItemType, DaggerMetadata, PaintingMetadata, AttackLogEntry } from "../types";
+import { fetchInventory, openChest, relistChest, displayPainting, undisplayPainting } from "../api";
+import { InventoryItem, ItemType, DaggerMetadata, PaintingMetadata } from "../types";
 import { ITEM_DISPLAY_NAMES, ITEM_BLOCK_COLORS } from "../itemNames";
 
 const CHEST_ITEM_TYPES: ItemType[] = ["common_chest", "rare_chest", "exotic_chest"];
@@ -16,7 +9,6 @@ const CHEST_ITEM_TYPES: ItemType[] = ["common_chest", "rare_chest", "exotic_ches
 export default function Inventory() {
   const { player, setPlayer, socket } = useSession();
   const [items, setItems] = useState<InventoryItem[]>([]);
-  const [logs, setLogs] = useState<AttackLogEntry[]>([]);
   const [message, setMessage] = useState<string | null>(null);
   const [relistPriceById, setRelistPriceById] = useState<Record<string, string>>({});
   const [daggerTargetById, setDaggerTargetById] = useState<Record<string, string>>({});
@@ -24,9 +16,8 @@ export default function Inventory() {
 
   const refresh = useCallback(async () => {
     if (!player) return;
-    const [inv, log] = await Promise.all([fetchInventory(player.id), fetchAttackLog(player.id)]);
+    const inv = await fetchInventory(player.id);
     setItems(inv.inventory);
-    setLogs(log.entries);
     setPlayer({ ...player, gold: inv.gold });
   }, [player?.id]);
 
@@ -143,20 +134,6 @@ export default function Inventory() {
             {ITEM_DISPLAY_NAMES[item.itemType]}
           </button>
         ))}
-      </div>
-
-      <div>
-        <h3 className="font-semibold">Attack Log</h3>
-        {logs.length === 0 && <p className="text-gray-400 text-sm">No attacks recorded.</p>}
-        <ul className="text-sm space-y-1 mt-1">
-          {logs.map((log) => (
-            <li key={log.id} className="text-gray-600">
-              {log.blocked
-                ? `Blocked an attack from ${log.attackerId ?? "unknown"} (Sigil consumed).`
-                : `Lost ${log.amountStolen}g to ${log.attackerId ?? "an unknown attacker"}.`}
-            </li>
-          ))}
-        </ul>
       </div>
 
       {selectedItem && (
