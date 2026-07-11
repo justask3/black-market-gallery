@@ -11,9 +11,9 @@ import { AuctionManager } from "../auction/AuctionManager.js";
 export function buildAuctionRouter(auctionManager: AuctionManager): Router {
   const router = Router();
 
-  /** Public snapshot of every live room across all tiers -- used on page load before the socket connects. */
+  /** Public snapshot of every live room across all tiers, plus per-tier cap/next-spawn info -- used on page load before the socket connects. */
   router.get("/auction", (req, res) => {
-    res.json({ rooms: auctionManager.getAllRooms() });
+    res.json({ rooms: auctionManager.getAllRooms(), tiers: auctionManager.getTierSummaries() });
   });
 
   return router;

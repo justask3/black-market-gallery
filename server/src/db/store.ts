@@ -1,4 +1,4 @@
-import { Player, InventoryItem, AttackLogEntry } from "../types.js";
+import { Player, InventoryItem, AttackLogEntry, DirectMessage } from "../types.js";
 
 /**
  * Plain in-memory store standing in for PostgreSQL at this stage (Option B,
@@ -12,14 +12,16 @@ import { Player, InventoryItem, AttackLogEntry } from "../types.js";
 export const players = new Map<string, Player>();
 export const inventories = new Map<string, InventoryItem[]>(); // keyed by playerId
 export const attackLogs: AttackLogEntry[] = [];
+export const conversations = new Map<string, DirectMessage[]>(); // keyed by sorted "idA:idB"
 
 const STARTING_GOLD = 10000;
 
-export function createPlayer(name: string): Player {
+export function createPlayer(name: string, isAdmin: boolean = false): Player {
   const player: Player = {
     id: crypto.randomUUID(),
     name,
     gold: STARTING_GOLD,
+    isAdmin,
   };
   players.set(player.id, player);
   inventories.set(player.id, []);
@@ -52,4 +54,19 @@ export function getAttackLogsFor(playerId: string): AttackLogEntry[] {
 
 export function addAttackLog(entry: AttackLogEntry): void {
   attackLogs.push(entry);
+}
+
+function conversationKey(a: string, b: string): string {
+  return [a, b].sort().join(":");
+}
+
+export function getConversation(a: string, b: string): DirectMessage[] {
+  return conversations.get(conversationKey(a, b)) ?? [];
+}
+
+export function addMessage(msg: DirectMessage): void {
+  const key = conversationKey(msg.fromId, msg.toId);
+  const list = conversations.get(key) ?? [];
+  list.push(msg);
+  conversations.set(key, list);
 }

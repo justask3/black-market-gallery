@@ -1,8 +1,9 @@
 import { Server as SocketIOServer, Socket } from "socket.io";
 import { AuctionManager } from "../auction/AuctionManager.js";
-import { getPlayer, getInventory, addAttackLog } from "../db/store.js";
+import { PresenceManager } from "../presence/PresenceManager.js";
+import { getPlayer, getInventory, addAttackLog, addMessage } from "../db/store.js";
 import { resolveDaggerAttack } from "../items/dagger.js";
-import { Player } from "../types.js";
+import { Player, DirectMessage } from "../types.js";
 
 declare module "socket.io" {
   interface Socket {
@@ -10,7 +11,11 @@ declare module "socket.io" {
   }
 }
 
-export function registerSocketHandlers(io: SocketIOServer, auctionManager: AuctionManager): void {
+export function registerSocketHandlers(
+  io: SocketIOServer,
+  auctionManager: AuctionManager,
+  presenceManager: PresenceManager
+): void {
   // Every connecting socket must present a valid playerId from the
   // lightweight login step. This is the socket-side equivalent of the
   // x-player-id header used on REST calls.
@@ -26,8 +31,36 @@ export function registerSocketHandlers(io: SocketIOServer, auctionManager: Aucti
     const player = socket.data.player;
 
     // A private room per player, used to deliver notifications (Dagger
-    // hits, Sigil blocks) regardless of which auction room they're in.
+    // hits, Sigil blocks, direct messages) regardless of which auction
+    // room they're in.
     socket.join(`player:${player.id}`);
+
+    presenceManager.markConnected(player.id);
+    socket.on("disconnect", () => presenceManager.markDisconnected(player.id));
+
+    socket.on("message:send", ({ toId, body }: { toId: string; body: string }) => {
+      const trimmed = body?.trim().slice(0, 500);
+      if (!trimmed) return;
+
+      const target = getPlayer(toId);
+      if (!target) {
+        socket.emit("message:rejected", { toId, reason: "Player not found." });
+        return;
+      }
+
+      const msg: DirectMessage = {
+        id: crypto.randomUUID(),
+        fromId: player.id,
+        toId,
+        body: trimmed,
+        timestamp: Date.now(),
+      };
+      addMessage(msg);
+      socket.emit("message:new", msg); // echo to sender
+      // fromName is included only on the live socket payload (not persisted)
+      // so the recipient's popup can show a sender name without a lookup.
+      io.to(`player:${toId}`).emit("message:new", { ...msg, fromName: player.name });
+    });
 
     socket.on("auction:join", ({ roomId, mode }: { roomId: string; mode: "public" | "anonymous" }) => {
       const result = auctionManager.joinRoom(player, roomId, mode);
@@ -61,6 +94,18 @@ export function registerSocketHandlers(io: SocketIOServer, auctionManager: Aucti
 
     socket.on("auction:leave", ({ roomId }: { roomId: string }) => {
       socket.leave(roomId);
+    });
+
+    /** Admin-only: nudge a live room's current-phase countdown by deltaMs (+/-). */
+    socket.on("auction:adminAdjustTime", ({ roomId, deltaMs }: { roomId: string; deltaMs: number }) => {
+      if (!player.isAdmin) {
+        socket.emit("auction:adminAdjustRejected", { roomId, reason: "Admin only." });
+        return;
+      }
+      const result = auctionManager.adjustRoomTime(roomId, deltaMs);
+      if (!result.adjusted) {
+        socket.emit("auction:adminAdjustRejected", { roomId, reason: result.reason });
+      }
     });
 
     socket.on(

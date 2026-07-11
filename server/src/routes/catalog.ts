@@ -10,10 +10,22 @@ export const catalogRouter = Router();
  */
 const CATALOG = [
   {
-    itemType: "chest",
-    name: "Mysterious Chest",
+    itemType: "common_chest",
+    name: "Common Chest",
     description:
-      "Won at auction. Can be opened to roll its contents (70% chance of 100-4000 gold, 20% chance of a Masterpiece Painting, 5% chance of a Sigil of the Iron Vault, 5% chance of a Poisoned Dagger), or relisted into a brand-new auction with your own starting price.",
+      "Won at auction from the Common Block. Can be opened to roll its contents (70% chance of 100-4,000 gold, 20% chance of a Masterpiece Painting, 5% chance of a Sigil of the Iron Vault, 5% chance of a Poisoned Dagger), or relisted into a brand-new auction with your own starting price.",
+  },
+  {
+    itemType: "rare_chest",
+    name: "Rare Chest",
+    description:
+      "Won at auction from the Rare Vault. Better odds than a Common Chest on open (50% chance of 500-8,000 gold, 30% chance of a Masterpiece Painting, 10% chance of a Sigil of the Iron Vault, 10% chance of a Poisoned Dagger), or can be relisted like any other item.",
+  },
+  {
+    itemType: "exotic_chest",
+    name: "Exotic Chest",
+    description:
+      "Won at auction from the Exotic Showcase -- the rarest chest in the game. Best odds on open (30% chance of 2,000-20,000 gold, 35% chance of a Masterpiece Painting, 15% chance of a Sigil of the Iron Vault, 20% chance of a Poisoned Dagger), or can be relisted like any other item.",
   },
   {
     itemType: "dagger",

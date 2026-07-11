@@ -3,8 +3,8 @@ import { requirePlayer } from "./middleware.js";
 import { getInventory, getPlayer, addItem, removeItem } from "../db/store.js";
 import { collectPaintingIncome, MAX_DISPLAYED_PAINTINGS } from "../items/painting.js";
 import { collectBleedingCoinDrain } from "../items/bleedingCoin.js";
-import { rollChestLoot } from "../items/chest.js";
-import { DaggerMetadata, PaintingMetadata, InventoryItem } from "../types.js";
+import { rollChestLoot, chestTierFor } from "../items/chest.js";
+import { DaggerMetadata, PaintingMetadata, InventoryItem, CHEST_ITEM_TYPES } from "../types.js";
 import { AuctionManager } from "../auction/AuctionManager.js";
 
 /**
@@ -117,15 +117,17 @@ export function buildInventoryRouter(auctionManager: AuctionManager): Router {
     res.json({ displayed: false });
   });
 
-  /** Opens a Chest: rolls the loot table and applies the result. */
+  /** Opens a Chest (any rarity): rolls that rarity's loot table and applies the result. */
   router.post("/items/:id/open", requirePlayer, (req, res) => {
     const player = req.player!;
     const inventory = getInventory(player.id);
-    const chest = inventory.find((i) => i.id === req.params.id && i.itemType === "chest");
+    const chest = inventory.find(
+      (i) => i.id === req.params.id && CHEST_ITEM_TYPES.includes(i.itemType)
+    );
     if (!chest) return res.status(404).json({ error: "Chest not found in your inventory." });
 
     removeItem(player.id, chest.id);
-    const loot = rollChestLoot();
+    const loot = rollChestLoot(chestTierFor(chest.itemType));
 
     if (loot.type === "gold") {
       player.gold += loot.amount;
@@ -151,18 +153,13 @@ export function buildInventoryRouter(auctionManager: AuctionManager): Router {
   });
 
   /**
-   * Relists an unopened Chest by enqueueing it into the Common Block tier's
-   * listing queue -- it no longer starts a room directly. The server's own
-   * schedulers (see auction/tiers.ts, AuctionManager) are the primary
-   * source of new rounds; this queue is drained first whenever a Common
-   * slot needs filling, ahead of the server spawning its own filler room.
-   *
-   * TODO: The Bleeding Coin catalog copy states it "cannot be listed on
-   * a normal auction," but no enforcement exists anywhere yet -- this is
-   * the only relist/listing route in the codebase today, and it's
-   * hard-scoped to itemType === "chest" already, so a coin can't reach
-   * it as things stand. If a generic (non-chest) listing route is added
-   * later, it must explicitly reject itemType === "bleeding_coin" there.
+   * Relists any item (Chest, Painting, Sigil, or Dagger -- Bleeding Coin is
+   * explicitly rejected, per its catalog description) by enqueueing it into
+   * the Common Block tier's listing queue -- it no longer starts a room
+   * directly. The server's own schedulers (see auction/tiers.ts,
+   * AuctionManager) are the primary source of new rounds; this queue is
+   * drained first whenever a Common slot needs filling, ahead of the server
+   * spawning its own filler room.
    */
   router.post("/items/:id/relist", requirePlayer, (req, res) => {
     const player = req.player!;
@@ -173,11 +170,21 @@ export function buildInventoryRouter(auctionManager: AuctionManager): Router {
     }
 
     const inventory = getInventory(player.id);
-    const chest = inventory.find((i) => i.id === req.params.id && i.itemType === "chest");
-    if (!chest) return res.status(404).json({ error: "Chest not found in your inventory." });
+    const item = inventory.find((i) => i.id === req.params.id);
+    if (!item) return res.status(404).json({ error: "Item not found in your inventory." });
+    if (item.itemType === "bleeding_coin") {
+      return res.status(400).json({ error: "Bleeding Coins cannot be listed on auction." });
+    }
 
-    auctionManager.enqueueCommonListing(startingPrice, player.id);
-    removeItem(player.id, chest.id);
+    // A relisted Painting is reset to a fresh, undisplayed state -- its
+    // display slot and accrual history don't carry over to whoever wins it.
+    const metadata =
+      item.itemType === "painting"
+        ? ({ lastCollected: Date.now(), displayed: false } as PaintingMetadata)
+        : item.metadata;
+
+    auctionManager.enqueueCommonListing(startingPrice, player.id, item.itemType, metadata);
+    removeItem(player.id, item.id);
     res.json({ queued: true });
   });
 

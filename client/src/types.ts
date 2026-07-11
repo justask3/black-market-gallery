@@ -1,4 +1,11 @@
-export type ItemType = "chest" | "painting" | "sigil" | "dagger" | "bleeding_coin";
+export type ItemType =
+  | "common_chest"
+  | "rare_chest"
+  | "exotic_chest"
+  | "painting"
+  | "sigil"
+  | "dagger"
+  | "bleeding_coin";
 
 export interface DaggerMetadata {
   chargesRemaining: number;
@@ -25,6 +32,7 @@ export interface Player {
   id: string;
   name: string;
   gold: number;
+  isAdmin: boolean;
 }
 
 export type AuctionPhase = "visible" | "flicker" | "ended";
@@ -44,6 +52,14 @@ export interface AuctionRoomSummary {
   participants: { displayName: string }[];
 }
 
+export interface AuctionTierSummary {
+  tierId: AuctionTierId;
+  tierLabel: string;
+  liveCount: number;
+  maxConcurrentRooms: number;
+  nextSpawnAt: number | null;
+}
+
 export interface CatalogItem {
   itemType: string;
   name: string;
@@ -56,5 +72,20 @@ export interface AttackLogEntry {
   attackerId: string | null;
   amountStolen: number;
   blocked: boolean;
+  timestamp: number;
+}
+
+export interface PlayerActivityEntry {
+  id: string;
+  name: string;
+  isOnline: boolean;
+  lastSeenAt: number;
+}
+
+export interface DirectMessage {
+  id: string;
+  fromId: string;
+  toId: string;
+  body: string;
   timestamp: number;
 }

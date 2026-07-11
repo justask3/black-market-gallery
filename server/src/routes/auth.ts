@@ -22,11 +22,12 @@ authRouter.post("/login", (req, res) => {
   }
 
   const trimmedName = name.trim();
-  const player = createPlayer(trimmedName);
+  const isAdmin = trimmedName.toLowerCase() === ADMIN_NAME;
+  const player = createPlayer(trimmedName, isAdmin);
 
-  if (trimmedName.toLowerCase() === ADMIN_NAME) {
+  if (isAdmin) {
     seedAllItems(player.id);
   }
 
-  res.json({ playerId: player.id, name: player.name, gold: player.gold });
+  res.json({ playerId: player.id, name: player.name, gold: player.gold, isAdmin: player.isAdmin });
 });

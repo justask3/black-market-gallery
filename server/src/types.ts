@@ -4,7 +4,16 @@
 
 export const DEBT_FLOOR = -1000;
 
-export type ItemType = "chest" | "painting" | "sigil" | "dagger" | "bleeding_coin";
+export type ItemType =
+  | "common_chest"
+  | "rare_chest"
+  | "exotic_chest"
+  | "painting"
+  | "sigil"
+  | "dagger"
+  | "bleeding_coin";
+
+export const CHEST_ITEM_TYPES: ItemType[] = ["common_chest", "rare_chest", "exotic_chest"];
 
 export interface DaggerMetadata {
   chargesRemaining: number; // starts at 2, decrements on use, never removed from inventory
@@ -37,6 +46,7 @@ export interface Player {
   id: string;
   name: string;
   gold: number; // can go negative, floored at DEBT_FLOOR
+  isAdmin: boolean;
 }
 
 export interface AttackLogEntry {
@@ -45,5 +55,13 @@ export interface AttackLogEntry {
   attackerId: string | null; // null when attacker identity is protected
   amountStolen: number;
   blocked: boolean; // true if a Sigil deflected the attempt
+  timestamp: number;
+}
+
+export interface DirectMessage {
+  id: string;
+  fromId: string;
+  toId: string;
+  body: string;
   timestamp: number;
 }

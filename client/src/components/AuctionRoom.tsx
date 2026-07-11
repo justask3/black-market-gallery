@@ -1,10 +1,18 @@
 import { useEffect, useState } from "react";
 import { useSession } from "../SessionContext";
 import { fetchAuctionRooms } from "../api";
-import { AuctionRoomSummary } from "../types";
+import { AuctionRoomSummary, AuctionTierSummary, AuctionTierId } from "../types";
 import { getMinIncrement } from "../bidIncrement";
 
 const ROOM_LIST_POLL_MS = 15 * 1000;
+
+const TIER_ORDER: AuctionTierId[] = ["common", "rare", "exotic"];
+
+const TIER_STYLES: Record<AuctionTierId, { header: string; card: string }> = {
+  common: { header: "bg-green-200 text-green-900", card: "bg-green-50 border-green-200" },
+  rare: { header: "bg-blue-200 text-blue-900", card: "bg-blue-50 border-blue-200" },
+  exotic: { header: "bg-purple-200 text-purple-900", card: "bg-purple-50 border-purple-200" },
+};
 
 function useCountdown(targetMs: number | null | undefined) {
   const [remaining, setRemaining] = useState<number | null>(null);
@@ -28,9 +36,37 @@ function formatMs(ms: number): string {
   return `${minutes}:${seconds.toString().padStart(2, "0")}`;
 }
 
+function NextSpawnCountdown({ nextSpawnAt }: { nextSpawnAt: number | null }) {
+  const remaining = useCountdown(nextSpawnAt);
+  if (remaining === null) return null;
+  return <p className="text-xs text-gray-500">Next auction opens in {formatMs(remaining)}</p>;
+}
+
+function RoomListCard({ room, onSelect }: { room: AuctionRoomSummary; onSelect: () => void }) {
+  const countdown = useCountdown(room.visiblePhaseEndsAt);
+
+  return (
+    <button onClick={onSelect} className="w-full text-left border rounded p-3 bg-white hover:bg-gray-50">
+      <div className="flex justify-between items-center">
+        <span className="text-sm text-gray-500 capitalize">{room.phase}</span>
+        <span className="text-sm text-gray-500">
+          {room.participants.length} participant{room.participants.length === 1 ? "" : "s"}
+        </span>
+      </div>
+      <p className="font-semibold mt-1">{room.itemLabel}</p>
+      <p className="text-lg font-bold">{room.currentPrice}g</p>
+      {room.phase === "visible" && countdown !== null && (
+        <p className="text-sm font-mono text-gray-600">{formatMs(countdown)}</p>
+      )}
+      {room.phase === "flicker" && <p className="text-sm italic text-orange-600">Flickering...</p>}
+    </button>
+  );
+}
+
 export default function AuctionRoom() {
   const { player, socket } = useSession();
   const [rooms, setRooms] = useState<AuctionRoomSummary[]>([]);
+  const [tiers, setTiers] = useState<AuctionTierSummary[]>([]);
   const [selectedRoomId, setSelectedRoomId] = useState<string | null>(null);
   const [state, setState] = useState<AuctionRoomSummary | null>(null);
   const [joined, setJoined] = useState(false);
@@ -42,7 +78,10 @@ export default function AuctionRoom() {
 
   const refreshRooms = () => {
     fetchAuctionRooms()
-      .then(({ rooms }) => setRooms(rooms))
+      .then(({ rooms, tiers }) => {
+        setRooms(rooms);
+        setTiers(tiers);
+      })
       .catch(() => {});
   };
 
@@ -105,6 +144,9 @@ export default function AuctionRoom() {
     const onBidRejected = ({ roomId, reason }: { roomId: string; reason: string }) => {
       if (roomId === selectedRoomId) setNotice(reason);
     };
+    const onAdminAdjustRejected = ({ roomId, reason }: { roomId: string; reason: string }) => {
+      if (roomId === selectedRoomId) setNotice(reason);
+    };
     const onNotification = (n: { type: string; amountStolen: number; attackerId: string | null }) => {
       const msg =
         n.type === "dagger_blocked"
@@ -121,6 +163,7 @@ export default function AuctionRoom() {
     socket.on("auction:ended", onEnded);
     socket.on("auction:joinRejected", onJoinRejected);
     socket.on("auction:bidRejected", onBidRejected);
+    socket.on("auction:adminAdjustRejected", onAdminAdjustRejected);
     socket.on("player:notification", onNotification);
 
     return () => {
@@ -130,6 +173,7 @@ export default function AuctionRoom() {
       socket.off("auction:ended", onEnded);
       socket.off("auction:joinRejected", onJoinRejected);
       socket.off("auction:bidRejected", onBidRejected);
+      socket.off("auction:adminAdjustRejected", onAdminAdjustRejected);
       socket.off("player:notification", onNotification);
     };
   }, [socket, player?.id, selectedRoomId]);
@@ -167,33 +211,46 @@ export default function AuctionRoom() {
     placeBid(Number(bidAmount));
   };
 
+  const adjustTime = (deltaMs: number) => {
+    if (!socket || !selectedRoomId) return;
+    socket.emit("auction:adminAdjustTime", { roomId: selectedRoomId, deltaMs });
+  };
+
   if (selectedRoomId === null || !state) {
     return (
-      <div className="max-w-lg mx-auto mt-10 space-y-4">
-        <h2 className="text-xl font-bold">Live Auctions</h2>
-        {rooms.length === 0 && (
-          <p className="text-center text-gray-500">No active auctions right now. Check back soon.</p>
-        )}
-        <div className="space-y-3">
-          {rooms.map((room) => (
-            <button
-              key={room.id}
-              onClick={() => selectRoom(room)}
-              className="w-full text-left border rounded p-4 bg-white hover:bg-gray-50"
-            >
-              <div className="flex justify-between items-center">
-                <span className="font-semibold">{room.tierLabel}</span>
-                <span className="text-sm text-gray-500 capitalize">{room.phase}</span>
+      <div className="max-w-5xl mx-auto mt-10 space-y-4 px-4">
+        <h2 className="text-xl font-bold text-center">Live Auctions</h2>
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+          {TIER_ORDER.map((tierId) => {
+            const tier = tiers.find((t) => t.tierId === tierId);
+            const tierRooms = rooms.filter((r) => r.tierId === tierId);
+            const styles = TIER_STYLES[tierId];
+            const hasOpenSlot = tier ? tier.liveCount < tier.maxConcurrentRooms : false;
+
+            return (
+              <div key={tierId} className={`rounded border ${styles.card} overflow-hidden`}>
+                <div className={`px-4 py-2 font-semibold ${styles.header}`}>
+                  {tier?.tierLabel ?? tierId}
+                  {tier && (
+                    <span className="ml-2 text-xs font-normal">
+                      ({tier.liveCount}/{tier.maxConcurrentRooms} live)
+                    </span>
+                  )}
+                </div>
+                <div className="p-3 space-y-2">
+                  {tierRooms.map((room) => (
+                    <RoomListCard key={room.id} room={room} onSelect={() => selectRoom(room)} />
+                  ))}
+
+                  {tierRooms.length === 0 && (
+                    <p className="text-sm text-gray-500">No live auction right now.</p>
+                  )}
+
+                  {hasOpenSlot && <NextSpawnCountdown nextSpawnAt={tier?.nextSpawnAt ?? null} />}
+                </div>
               </div>
-              <p className="text-sm text-gray-600 mt-1">{room.itemLabel}</p>
-              <div className="flex justify-between items-center mt-2">
-                <span className="text-lg font-bold">{room.currentPrice}g</span>
-                <span className="text-sm text-gray-500">
-                  {room.participants.length} participant{room.participants.length === 1 ? "" : "s"}
-                </span>
-              </div>
-            </button>
-          ))}
+            );
+          })}
         </div>
       </div>
     );
@@ -221,6 +278,38 @@ export default function AuctionRoom() {
       )}
 
       <p className="text-2xl font-bold">{state.currentPrice}g</p>
+
+      {player?.isAdmin && state.phase !== "ended" && (
+        <div className="border border-amber-300 bg-amber-50 rounded p-3 space-y-2">
+          <p className="text-xs font-semibold text-amber-800">Admin: adjust auction time</p>
+          <div className="flex gap-2">
+            <button
+              className="bg-amber-600 text-white rounded px-2 py-1 text-sm"
+              onClick={() => adjustTime(-5 * 60 * 1000)}
+            >
+              −5m
+            </button>
+            <button
+              className="bg-amber-600 text-white rounded px-2 py-1 text-sm"
+              onClick={() => adjustTime(-60 * 1000)}
+            >
+              −1m
+            </button>
+            <button
+              className="bg-amber-600 text-white rounded px-2 py-1 text-sm"
+              onClick={() => adjustTime(60 * 1000)}
+            >
+              +1m
+            </button>
+            <button
+              className="bg-amber-600 text-white rounded px-2 py-1 text-sm"
+              onClick={() => adjustTime(5 * 60 * 1000)}
+            >
+              +5m
+            </button>
+          </div>
+        </div>
+      )}
 
       {!joined && state.phase !== "ended" && (
         <div className="space-x-2">

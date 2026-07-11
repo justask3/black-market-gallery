@@ -1,7 +1,14 @@
 import { InventoryItem, ItemType, DaggerMetadata, PaintingMetadata } from "../types.js";
 import { addItem } from "../db/store.js";
 
-const ALL_ITEM_TYPES: ItemType[] = ["chest", "painting", "sigil", "dagger"];
+const ALL_ITEM_TYPES: ItemType[] = [
+  "common_chest",
+  "rare_chest",
+  "exotic_chest",
+  "painting",
+  "sigil",
+  "dagger",
+];
 
 /**
  * Grants one of every item type in the game. Metadata mirrors what

@@ -7,7 +7,10 @@ import { buildInventoryRouter } from "./routes/inventory.js";
 import { buildAuctionRouter } from "./routes/auction.js";
 import { attackLogRouter } from "./routes/attackLog.js";
 import { catalogRouter } from "./routes/catalog.js";
+import { buildPresenceRouter } from "./routes/presence.js";
+import { messagesRouter } from "./routes/messages.js";
 import { AuctionManager } from "./auction/AuctionManager.js";
+import { PresenceManager } from "./presence/PresenceManager.js";
 import { registerSocketHandlers } from "./sockets/socketHandlers.js";
 
 const PORT = 3001;
@@ -23,14 +26,17 @@ const io = new SocketIOServer(httpServer, {
 });
 
 const auctionManager = new AuctionManager(io);
+const presenceManager = new PresenceManager(io);
 
 app.use(authRouter);
 app.use(buildInventoryRouter(auctionManager));
 app.use(buildAuctionRouter(auctionManager));
 app.use(attackLogRouter);
 app.use(catalogRouter);
+app.use(buildPresenceRouter(presenceManager));
+app.use(messagesRouter);
 
-registerSocketHandlers(io, auctionManager);
+registerSocketHandlers(io, auctionManager, presenceManager);
 
 // Starts every tier's automated spawn scheduler (Common Block, Rare Vault,
 // Exotic Showcase) -- the server itself is now the primary driver of

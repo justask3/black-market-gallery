@@ -7,6 +7,7 @@ import Gallery from "./components/Gallery";
 import AuctionRoom from "./components/AuctionRoom";
 import Catalog from "./components/Catalog";
 import NPCWindow from "./components/NPCWindow";
+import PlayerActivity from "./components/PlayerActivity";
 
 type View = "menu" | "inventory" | "gallery" | "auction" | "catalog" | "npc";
 
@@ -27,12 +28,18 @@ export default function App() {
         <button onClick={() => setView("npc")}>NPC</button>
       </nav>
 
-      {view === "menu" && <MainMenu onNavigate={setView} />}
-      {view === "inventory" && <Inventory />}
-      {view === "gallery" && <Gallery />}
-      {view === "auction" && <AuctionRoom />}
-      {view === "catalog" && <Catalog />}
-      {view === "npc" && <NPCWindow />}
+      <div className="flex flex-col lg:flex-row gap-4 p-4 items-start">
+        <div className="flex-1 min-w-0">
+          {view === "menu" && <MainMenu onNavigate={setView} />}
+          {view === "inventory" && <Inventory />}
+          {view === "gallery" && <Gallery />}
+          {view === "auction" && <AuctionRoom />}
+          {view === "catalog" && <Catalog />}
+          {view === "npc" && <NPCWindow />}
+        </div>
+
+        <PlayerActivity />
+      </div>
     </div>
   );
 }

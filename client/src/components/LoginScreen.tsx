@@ -15,7 +15,7 @@ export default function LoginScreen() {
     setLoading(true);
     try {
       const result = await login(name.trim());
-      setPlayer({ id: result.playerId, name: result.name, gold: result.gold });
+      setPlayer({ id: result.playerId, name: result.name, gold: result.gold, isAdmin: result.isAdmin });
     } catch (err) {
       setError(err instanceof Error ? err.message : "Login failed.");
     } finally {

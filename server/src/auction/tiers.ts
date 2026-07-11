@@ -1,3 +1,5 @@
+import { ItemType } from "../types.js";
+
 export type AuctionTierId = "common" | "rare" | "exotic";
 
 export type SpawnCadence =
@@ -9,6 +11,8 @@ export interface AuctionTierConfig {
   id: AuctionTierId;
   label: string;
   itemLabel: string;
+  /** What a server-owned filler room in this tier awards (relisted items override this). */
+  defaultItemType: ItemType;
   maxConcurrentRooms: number;
   visibleDurationMs: number;
   flickerMinMs: number;
@@ -27,7 +31,8 @@ export const AUCTION_TIERS: Record<AuctionTierId, AuctionTierConfig> = {
   common: {
     id: "common",
     label: "Common Block",
-    itemLabel: "Mysterious Chest",
+    itemLabel: "Common Chest",
+    defaultItemType: "common_chest",
     maxConcurrentRooms: 2,
     visibleDurationMs: 4 * 60 * 1000,
     flickerMinMs: SHARED_FLICKER_MIN_MS,
@@ -41,7 +46,8 @@ export const AUCTION_TIERS: Record<AuctionTierId, AuctionTierConfig> = {
   rare: {
     id: "rare",
     label: "Rare Vault",
-    itemLabel: "Mysterious Chest",
+    itemLabel: "Rare Chest",
+    defaultItemType: "rare_chest",
     maxConcurrentRooms: 1,
     visibleDurationMs: 12 * 60 * 1000,
     flickerMinMs: SHARED_FLICKER_MIN_MS,
@@ -55,7 +61,8 @@ export const AUCTION_TIERS: Record<AuctionTierId, AuctionTierConfig> = {
   exotic: {
     id: "exotic",
     label: "Exotic Showcase",
-    itemLabel: "Mysterious Chest",
+    itemLabel: "Exotic Chest",
+    defaultItemType: "exotic_chest",
     maxConcurrentRooms: 1,
     visibleDurationMs: 25 * 60 * 1000,
     flickerMinMs: SHARED_FLICKER_MIN_MS,

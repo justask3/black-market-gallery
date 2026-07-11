@@ -1,4 +1,13 @@
-import { Player, InventoryItem, AuctionRoomSummary, AttackLogEntry, CatalogItem } from "./types";
+import {
+  Player,
+  InventoryItem,
+  AuctionRoomSummary,
+  AuctionTierSummary,
+  AttackLogEntry,
+  CatalogItem,
+  PlayerActivityEntry,
+  DirectMessage,
+} from "./types";
 
 const API_BASE = "http://localhost:3001";
 
@@ -20,7 +29,7 @@ async function request<T>(
 }
 
 export function login(name: string) {
-  return request<{ playerId: string; name: string; gold: number }>("/login", null, {
+  return request<{ playerId: string; name: string; gold: number; isAdmin: boolean }>("/login", null, {
     method: "POST",
     body: JSON.stringify({ name }),
   });
@@ -63,7 +72,7 @@ export function undisplayPainting(playerId: string, itemId: string) {
 }
 
 export function fetchAuctionRooms() {
-  return request<{ rooms: AuctionRoomSummary[] }>("/auction", null);
+  return request<{ rooms: AuctionRoomSummary[]; tiers: AuctionTierSummary[] }>("/auction", null);
 }
 
 export function fetchAttackLog(playerId: string) {
@@ -72,4 +81,12 @@ export function fetchAttackLog(playerId: string) {
 
 export function fetchCatalog() {
   return request<{ items: CatalogItem[] }>("/catalog", null);
+}
+
+export function fetchPlayerActivity() {
+  return request<{ players: PlayerActivityEntry[] }>("/players/activity", null);
+}
+
+export function fetchMessages(playerId: string, otherPlayerId: string) {
+  return request<{ messages: DirectMessage[] }>(`/messages/${otherPlayerId}`, playerId);
 }

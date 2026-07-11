@@ -1,15 +1,25 @@
 import { Server as SocketIOServer } from "socket.io";
 import { AuctionRoom } from "./AuctionRoom.js";
 import { AUCTION_TIERS, AUCTION_TIER_ORDER, AuctionTierId } from "./tiers.js";
-import { Player, InventoryItem } from "../types.js";
-import { canAfford, debit } from "../economy/gold.js";
+import { Player, InventoryItem, ItemType, ItemMetadata } from "../types.js";
+import { canAfford, debit, credit } from "../economy/gold.js";
 import { addItem, getPlayer } from "../db/store.js";
+import { ITEM_DISPLAY_NAMES } from "../items/itemNames.js";
 
 export type EntryMode = "public" | "anonymous";
 
 interface QueuedListing {
   startingPrice: number;
   listedByPlayerId: string;
+  itemType: ItemType;
+  metadata: ItemMetadata;
+}
+
+interface RoomItemOverride {
+  itemLabel: string;
+  itemType: ItemType;
+  metadata: ItemMetadata;
+  sellerId: string;
 }
 
 export interface AuctionRoomSummary {
@@ -23,6 +33,15 @@ export interface AuctionRoomSummary {
   currentPrice: number;
   visiblePhaseEndsAt: number | null;
   participants: { displayName: string }[];
+}
+
+export interface AuctionTierSummary {
+  tierId: AuctionTierId;
+  tierLabel: string;
+  liveCount: number;
+  maxConcurrentRooms: number;
+  /** Epoch ms of this tier's next scheduled spawn attempt, or null before bootstrap() runs. */
+  nextSpawnAt: number | null;
 }
 
 /**
@@ -39,6 +58,7 @@ export class AuctionManager {
   private rooms: Map<string, AuctionRoom> = new Map();
   private roomTier: Map<string, AuctionTierId> = new Map();
   private commonQueue: QueuedListing[] = [];
+  private nextSpawnAt: Map<AuctionTierId, number> = new Map();
 
   constructor(io: SocketIOServer) {
     this.io = io;
@@ -79,6 +99,20 @@ export class AuctionManager {
     return summaries;
   }
 
+  /** Per-tier snapshot for the client's 3-column view: live count, cap, and next scheduled spawn. */
+  getTierSummaries(): AuctionTierSummary[] {
+    return AUCTION_TIER_ORDER.map((tierId) => {
+      const tier = AUCTION_TIERS[tierId];
+      return {
+        tierId,
+        tierLabel: tier.label,
+        liveCount: this.activeCountFor(tierId),
+        maxConcurrentRooms: tier.maxConcurrentRooms,
+        nextSpawnAt: this.nextSpawnAt.get(tierId) ?? null,
+      };
+    });
+  }
+
   /**
    * Finds a room where both given players are participants -- used by the
    * Dagger flow to determine whether an attack happens "in the same room"
@@ -94,13 +128,20 @@ export class AuctionManager {
   }
 
   /**
-   * Enqueues a player's relisted Chest into the Common Block queue. Always
-   * succeeds -- capacity is enforced later, when the queue is drained, not
-   * at enqueue time. Immediately attempts a fill in case a Common slot is
-   * free right now, rather than making the player wait for the next tick.
+   * Enqueues a player's relisted item (any type except Bleeding Coin,
+   * enforced by the route calling this) into the Common Block queue.
+   * Always succeeds -- capacity is enforced later, when the queue is
+   * drained, not at enqueue time. Immediately attempts a fill in case a
+   * Common slot is free right now, rather than making the player wait for
+   * the next tick.
    */
-  enqueueCommonListing(startingPrice: number, listedByPlayerId: string): { queued: true } {
-    this.commonQueue.push({ startingPrice, listedByPlayerId });
+  enqueueCommonListing(
+    startingPrice: number,
+    listedByPlayerId: string,
+    itemType: ItemType,
+    metadata: ItemMetadata
+  ): { queued: true } {
+    this.commonQueue.push({ startingPrice, listedByPlayerId, itemType, metadata });
     this.attemptFill("common");
     return { queued: true };
   }
@@ -126,6 +167,24 @@ export class AuctionManager {
     return { joined: true };
   }
 
+  /**
+   * Admin-only: shifts a live room's current-phase countdown by deltaMs.
+   * Broadcasts the room's updated public state so connected clients' visible
+   * countdown reflects the change immediately (a no-op for the flicker
+   * phase, since its end time was never sent to clients to begin with).
+   */
+  adjustRoomTime(roomId: string, deltaMs: number): { adjusted: boolean; reason?: string } {
+    const room = this.rooms.get(roomId);
+    if (!room) {
+      return { adjusted: false, reason: "Room not found or auction already ended." };
+    }
+    const result = room.adjustTime(deltaMs);
+    if (result.adjusted) {
+      this.io.to(roomId).emit("auction:state", room.getPublicState());
+    }
+    return result;
+  }
+
   private activeCountFor(tierId: AuctionTierId): number {
     let count = 0;
     for (const t of this.roomTier.values()) {
@@ -149,20 +208,33 @@ export class AuctionManager {
     while (this.activeCountFor(tierId) < tier.maxConcurrentRooms) {
       if (tier.playerFeedable && this.commonQueue.length > 0) {
         const listing = this.commonQueue.shift()!;
-        this.spawnRoom(tierId, listing.startingPrice);
+        const listedByPlayer = getPlayer(listing.listedByPlayerId);
+        const itemDisplayName = ITEM_DISPLAY_NAMES[listing.itemType];
+        const itemLabel = listedByPlayer
+          ? `${itemDisplayName} — ${listedByPlayer.name}'s Auction`
+          : itemDisplayName;
+        this.spawnRoom(tierId, listing.startingPrice, {
+          itemLabel,
+          itemType: listing.itemType,
+          metadata: listing.metadata,
+          sellerId: listing.listedByPlayerId,
+        });
       } else {
         this.spawnRoom(tierId, tier.startingPrice);
       }
     }
   }
 
-  private spawnRoom(tierId: AuctionTierId, startingPrice: number): void {
+  private spawnRoom(tierId: AuctionTierId, startingPrice: number, override?: RoomItemOverride): void {
     const tier = AUCTION_TIERS[tierId];
     const roomId = crypto.randomUUID();
 
     const room = new AuctionRoom({
       id: roomId,
-      itemLabel: tier.itemLabel,
+      itemLabel: override?.itemLabel ?? tier.itemLabel,
+      itemType: override?.itemType ?? tier.defaultItemType,
+      itemMetadata: override?.metadata ?? {},
+      sellerId: override?.sellerId ?? null,
       startingPrice,
       visibleDurationMs: tier.visibleDurationMs,
       flickerMinMs: tier.flickerMinMs,
@@ -182,9 +254,11 @@ export class AuctionManager {
 
   /**
    * Called once when a room's timer fires "ended". Charges the winner the
-   * final price, drops an unopened Chest into their inventory, then frees
-   * the room's slot and immediately attempts to refill it -- independent of
-   * that tier's own periodic/scheduled tick.
+   * final price, drops the room's actual item (chest for server fillers, or
+   * whatever a player relisted) into their inventory, pays the original
+   * seller (if this was a relisted item, not a server-owned filler), then
+   * frees the room's slot and immediately attempts to refill it --
+   * independent of that tier's own periodic/scheduled tick.
    */
   private settleAuctionEnd(
     room: AuctionRoom,
@@ -196,14 +270,22 @@ export class AuctionManager {
       const winner = getPlayer(winnerId);
       if (winner) {
         room.settleWinner(winner);
-        const chest: InventoryItem = {
+        const awardedItem: InventoryItem = {
           id: crypto.randomUUID(),
           ownerId: winner.id,
-          itemType: "chest",
-          metadata: {},
+          itemType: room.itemType,
+          metadata: room.itemMetadata,
           createdAt: Date.now(),
         };
-        addItem(chest);
+        addItem(awardedItem);
+
+        // Server-owned filler rooms have no seller -- the winning bid is
+        // just the cost of participating, same as before. A relisted
+        // item's seller is paid the winning bid, same as any real auction.
+        if (room.sellerId) {
+          const seller = getPlayer(room.sellerId);
+          if (seller) credit(seller, finalPrice);
+        }
       }
     }
 
@@ -220,13 +302,18 @@ export class AuctionManager {
     const cadence = tier.cadence;
 
     if (cadence.type === "interval") {
-      setInterval(() => this.attemptFill(tierId), cadence.intervalMs);
+      this.nextSpawnAt.set(tierId, Date.now() + cadence.intervalMs);
+      setInterval(() => {
+        this.attemptFill(tierId);
+        this.nextSpawnAt.set(tierId, Date.now() + cadence.intervalMs);
+      }, cadence.intervalMs);
       return;
     }
 
     if (cadence.type === "randomInterval") {
       const scheduleNext = () => {
         const delay = cadence.minMs + Math.random() * (cadence.maxMs - cadence.minMs);
+        this.nextSpawnAt.set(tierId, Date.now() + delay);
         setTimeout(() => {
           this.attemptFill(tierId);
           scheduleNext();
@@ -239,6 +326,7 @@ export class AuctionManager {
     // dailyTimes
     const scheduleNext = () => {
       const delay = msUntilNextDailyOccurrence(cadence.hours);
+      this.nextSpawnAt.set(tierId, Date.now() + delay);
       setTimeout(() => {
         this.attemptFill(tierId);
         scheduleNext();

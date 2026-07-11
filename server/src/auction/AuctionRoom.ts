@@ -1,6 +1,6 @@
 import { canAfford, debit } from "../economy/gold.js";
 import { getMinIncrement } from "./bidIncrement.js";
-import { Player } from "../types.js";
+import { Player, ItemType, ItemMetadata } from "../types.js";
 
 export type AuctionPhase = "visible" | "flicker" | "ended";
 
@@ -32,12 +32,18 @@ export class AuctionRoom {
   currentPrice: number;
   currentWinnerId: string | null = null;
   itemLabel: string;
+  /** What the winner actually receives on settlement -- see AuctionManager.settleAuctionEnd. */
+  readonly itemType: ItemType;
+  readonly itemMetadata: ItemMetadata;
+  /** The player who relisted this item, if any -- null for server-owned filler rooms. Paid the winning bid on settlement. */
+  readonly sellerId: string | null;
 
   participants: Map<string, Participant> = new Map();
   bidHistory: Bid[] = [];
 
   private phaseTimer: ReturnType<typeof setTimeout> | null = null;
   private visiblePhaseEndsAt: number | null = null;
+  private flickerEndsAt: number | null = null; // internal only, never exposed via getPublicState
   private readonly visibleDurationMs: number;
   private readonly flickerMinMs: number;
   private readonly flickerMaxMs: number;
@@ -47,6 +53,9 @@ export class AuctionRoom {
   constructor(opts: {
     id: string;
     itemLabel: string;
+    itemType: ItemType;
+    itemMetadata: ItemMetadata;
+    sellerId: string | null;
     startingPrice: number;
     visibleDurationMs: number;
     flickerMinMs: number;
@@ -56,6 +65,9 @@ export class AuctionRoom {
   }) {
     this.id = opts.id;
     this.itemLabel = opts.itemLabel;
+    this.itemType = opts.itemType;
+    this.itemMetadata = opts.itemMetadata;
+    this.sellerId = opts.sellerId;
     this.currentPrice = opts.startingPrice;
     this.visibleDurationMs = opts.visibleDurationMs;
     this.flickerMinMs = opts.flickerMinMs;
@@ -80,7 +92,38 @@ export class AuctionRoom {
     const randomDurationMs =
       this.flickerMinMs + Math.random() * (this.flickerMaxMs - this.flickerMinMs);
 
+    this.flickerEndsAt = Date.now() + randomDurationMs;
     this.phaseTimer = setTimeout(() => this.end(), randomDurationMs);
+  }
+
+  /**
+   * Admin-only: shifts the current phase's end time by deltaMs (positive
+   * extends, negative shortens) and reschedules the underlying timer to
+   * match. A large enough negative delta ends the phase almost immediately
+   * rather than firing in the past. Works during either "visible" or
+   * "flicker" -- the flicker end time still isn't exposed to clients via
+   * getPublicState, so adjusting it doesn't compromise the "unpredictable
+   * to players" invariant described above.
+   */
+  adjustTime(deltaMs: number): { adjusted: boolean; reason?: string } {
+    if (this.phase === "ended") {
+      return { adjusted: false, reason: "Auction has already ended." };
+    }
+
+    const MIN_DELAY_MS = 250;
+    if (this.phaseTimer) clearTimeout(this.phaseTimer);
+
+    if (this.phase === "visible") {
+      const newEndsAt = Math.max(Date.now() + MIN_DELAY_MS, (this.visiblePhaseEndsAt ?? Date.now()) + deltaMs);
+      this.visiblePhaseEndsAt = newEndsAt;
+      this.phaseTimer = setTimeout(() => this.beginFlicker(), newEndsAt - Date.now());
+    } else {
+      const newEndsAt = Math.max(Date.now() + MIN_DELAY_MS, (this.flickerEndsAt ?? Date.now()) + deltaMs);
+      this.flickerEndsAt = newEndsAt;
+      this.phaseTimer = setTimeout(() => this.end(), newEndsAt - Date.now());
+    }
+
+    return { adjusted: true };
   }
 
   private end(): void {

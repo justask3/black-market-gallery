@@ -8,7 +8,10 @@ import {
   undisplayPainting,
   fetchAttackLog,
 } from "../api";
-import { InventoryItem, DaggerMetadata, PaintingMetadata, AttackLogEntry } from "../types";
+import { InventoryItem, ItemType, DaggerMetadata, PaintingMetadata, AttackLogEntry } from "../types";
+import { ITEM_DISPLAY_NAMES, ITEM_BLOCK_COLORS } from "../itemNames";
+
+const CHEST_ITEM_TYPES: ItemType[] = ["common_chest", "rare_chest", "exotic_chest"];
 
 export default function Inventory() {
   const { player, setPlayer, socket } = useSession();
@@ -17,6 +20,7 @@ export default function Inventory() {
   const [message, setMessage] = useState<string | null>(null);
   const [relistPriceById, setRelistPriceById] = useState<Record<string, string>>({});
   const [daggerTargetById, setDaggerTargetById] = useState<Record<string, string>>({});
+  const [selectedItemId, setSelectedItemId] = useState<string | null>(null);
 
   const refresh = useCallback(async () => {
     if (!player) return;
@@ -31,19 +35,34 @@ export default function Inventory() {
   }, [refresh]);
 
   // Listen for Dagger outcomes / notifications so the inventory (charges,
-  // gold) stays in sync without requiring a manual refresh.
+  // gold) stays in sync without requiring a manual refresh, and so the
+  // attacker actually sees what happened (or why it was rejected).
   useEffect(() => {
     if (!socket) return;
-    const handler = () => refresh();
-    socket.on("dagger:result", handler);
-    socket.on("player:notification", handler);
+    const onDaggerResult = (r: { outcome: "success" | "blocked"; amountStolen: number }) => {
+      setMessage(
+        r.outcome === "success"
+          ? `Dagger attack succeeded — you stole ${r.amountStolen}g!`
+          : "Dagger attack was blocked by the target's Sigil."
+      );
+      refresh();
+    };
+    const onDaggerRejected = ({ reason }: { reason: string }) => setMessage(reason);
+    const onNotification = () => refresh();
+
+    socket.on("dagger:result", onDaggerResult);
+    socket.on("dagger:rejected", onDaggerRejected);
+    socket.on("player:notification", onNotification);
     return () => {
-      socket.off("dagger:result", handler);
-      socket.off("player:notification", handler);
+      socket.off("dagger:result", onDaggerResult);
+      socket.off("dagger:rejected", onDaggerRejected);
+      socket.off("player:notification", onNotification);
     };
   }, [socket, refresh]);
 
   if (!player) return null;
+
+  const selectedItem = items.find((i) => i.id === selectedItemId) ?? null;
 
   const handleOpen = async (item: InventoryItem) => {
     setMessage(null);
@@ -54,6 +73,7 @@ export default function Inventory() {
       } else {
         setMessage(`The chest held a ${result.itemType}!`);
       }
+      setSelectedItemId(null);
       refresh();
     } catch (err) {
       setMessage(err instanceof Error ? err.message : "Failed to open chest.");
@@ -68,10 +88,11 @@ export default function Inventory() {
     }
     try {
       await relistChest(player.id, item.id, price);
-      setMessage("Chest queued for auction — it'll go live soon in the Auction Room.");
+      setMessage("Item queued for auction — it'll go live soon in the Auction Room.");
+      setSelectedItemId(null);
       refresh();
     } catch (err) {
-      setMessage(err instanceof Error ? err.message : "Failed to relist chest.");
+      setMessage(err instanceof Error ? err.message : "Failed to relist item.");
     }
   };
 
@@ -112,89 +133,15 @@ export default function Inventory() {
 
       {items.length === 0 && <p className="text-gray-400">Empty. Win a Chest at auction to start.</p>}
 
-      <div className="space-y-3">
+      <div className="grid grid-cols-3 sm:grid-cols-4 gap-3">
         {items.map((item) => (
-          <div key={item.id} className="border rounded p-4 bg-white">
-            <p className="font-semibold capitalize">{item.itemType}</p>
-
-            {item.itemType === "chest" && (
-              <div className="mt-2 space-y-2">
-                <button
-                  className="bg-gray-800 text-white text-sm rounded px-3 py-1 mr-2"
-                  onClick={() => handleOpen(item)}
-                >
-                  Open
-                </button>
-                <input
-                  className="border rounded px-2 py-1 text-sm w-32"
-                  placeholder="Start price"
-                  value={relistPriceById[item.id] ?? ""}
-                  onChange={(e) =>
-                    setRelistPriceById((s) => ({ ...s, [item.id]: e.target.value }))
-                  }
-                />
-                <button
-                  className="bg-gray-600 text-white text-sm rounded px-3 py-1"
-                  onClick={() => handleRelist(item)}
-                >
-                  Relist to Auction
-                </button>
-              </div>
-            )}
-
-            {item.itemType === "painting" && (
-              <div className="mt-2">
-                <p className="text-sm text-gray-500">
-                  Status: {(item.metadata as PaintingMetadata).displayed ? "Displayed (earning)" : "Stored (not earning)"}
-                </p>
-                <button
-                  className="mt-1 bg-gray-800 text-white text-sm rounded px-3 py-1"
-                  onClick={() => handleDisplayToggle(item)}
-                >
-                  {(item.metadata as PaintingMetadata).displayed ? "Undisplay" : "Display"}
-                </button>
-              </div>
-            )}
-
-            {item.itemType === "sigil" && (
-              <p className="text-sm text-gray-500 mt-2">
-                Passive — deflects the next Dagger attempt against you.
-              </p>
-            )}
-
-            {item.itemType === "bleeding_coin" && (
-              <p className="text-sm text-red-700 mt-2">
-                Cursed — silently draining your gold every 10 minutes. Cannot be discarded or
-                listed on a normal auction.
-              </p>
-            )}
-
-            {item.itemType === "dagger" && (
-              <div className="mt-2 space-y-2">
-                <p className="text-sm text-gray-500">
-                  Charges remaining: {(item.metadata as DaggerMetadata).chargesRemaining}
-                </p>
-                {(item.metadata as DaggerMetadata).chargesRemaining > 0 && (
-                  <>
-                    <input
-                      className="border rounded px-2 py-1 text-sm w-full"
-                      placeholder="Target player ID"
-                      value={daggerTargetById[item.id] ?? ""}
-                      onChange={(e) =>
-                        setDaggerTargetById((s) => ({ ...s, [item.id]: e.target.value }))
-                      }
-                    />
-                    <button
-                      className="bg-red-700 text-white text-sm rounded px-3 py-1"
-                      onClick={() => handleUseDagger(item)}
-                    >
-                      Use Dagger
-                    </button>
-                  </>
-                )}
-              </div>
-            )}
-          </div>
+          <button
+            key={item.id}
+            onClick={() => setSelectedItemId(item.id)}
+            className={`rounded p-3 text-center text-xs font-semibold shadow hover:opacity-90 ${ITEM_BLOCK_COLORS[item.itemType]}`}
+          >
+            {ITEM_DISPLAY_NAMES[item.itemType]}
+          </button>
         ))}
       </div>
 
@@ -211,6 +158,113 @@ export default function Inventory() {
           ))}
         </ul>
       </div>
+
+      {selectedItem && (
+        <div
+          className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4"
+          onClick={() => setSelectedItemId(null)}
+        >
+          <div
+            className="bg-white rounded shadow-lg max-w-sm w-full p-5 space-y-3"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="flex justify-between items-start">
+              <p className={`font-bold text-lg ${ITEM_BLOCK_COLORS[selectedItem.itemType]} inline-block px-2 py-1 rounded`}>
+                {ITEM_DISPLAY_NAMES[selectedItem.itemType]}
+              </p>
+              <button className="text-gray-500 text-sm" onClick={() => setSelectedItemId(null)}>
+                ✕
+              </button>
+            </div>
+
+            {CHEST_ITEM_TYPES.includes(selectedItem.itemType) && (
+              <div>
+                <button
+                  className="bg-gray-800 text-white text-sm rounded px-3 py-1"
+                  onClick={() => handleOpen(selectedItem)}
+                >
+                  Open
+                </button>
+              </div>
+            )}
+
+            {selectedItem.itemType === "painting" && (
+              <div>
+                <p className="text-sm text-gray-500">
+                  Status:{" "}
+                  {(selectedItem.metadata as PaintingMetadata).displayed
+                    ? "Displayed (earning)"
+                    : "Stored (not earning)"}
+                </p>
+                <button
+                  className="mt-1 bg-gray-800 text-white text-sm rounded px-3 py-1"
+                  onClick={() => handleDisplayToggle(selectedItem)}
+                >
+                  {(selectedItem.metadata as PaintingMetadata).displayed ? "Undisplay" : "Display"}
+                </button>
+              </div>
+            )}
+
+            {selectedItem.itemType === "sigil" && (
+              <p className="text-sm text-gray-500">
+                Passive — deflects the next Dagger attempt against you.
+              </p>
+            )}
+
+            {selectedItem.itemType === "bleeding_coin" && (
+              <p className="text-sm text-red-700">
+                Cursed — silently draining your gold every 10 minutes. Cannot be discarded or
+                listed on a normal auction.
+              </p>
+            )}
+
+            {selectedItem.itemType === "dagger" && (
+              <div className="space-y-2">
+                <p className="text-sm text-gray-500">
+                  Charges remaining: {(selectedItem.metadata as DaggerMetadata).chargesRemaining}
+                </p>
+                {(selectedItem.metadata as DaggerMetadata).chargesRemaining > 0 && (
+                  <>
+                    <input
+                      className="border rounded px-2 py-1 text-sm w-full"
+                      placeholder="Target player ID"
+                      value={daggerTargetById[selectedItem.id] ?? ""}
+                      onChange={(e) =>
+                        setDaggerTargetById((s) => ({ ...s, [selectedItem.id]: e.target.value }))
+                      }
+                    />
+                    <button
+                      className="bg-red-700 text-white text-sm rounded px-3 py-1"
+                      onClick={() => handleUseDagger(selectedItem)}
+                    >
+                      Use Dagger
+                    </button>
+                  </>
+                )}
+              </div>
+            )}
+
+            {selectedItem.itemType !== "bleeding_coin" && (
+              <div className="flex gap-2 items-center pt-2 border-t">
+                <input
+                  className="border rounded px-2 py-1 text-sm w-32"
+                  placeholder="Start price"
+                  value={relistPriceById[selectedItem.id] ?? ""}
+                  onChange={(e) =>
+                    setRelistPriceById((s) => ({ ...s, [selectedItem.id]: e.target.value }))
+                  }
+                />
+                <button
+                  className="bg-gray-600 text-white text-sm rounded px-3 py-1"
+                  onClick={() => handleRelist(selectedItem)}
+                >
+                  Relist to Auction
+                </button>
+              </div>
+            )}
+          </div>
+        </div>
+      )}
     </div>
   );
 }
