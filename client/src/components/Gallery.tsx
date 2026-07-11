@@ -30,37 +30,39 @@ export default function Gallery() {
     return () => clearInterval(id);
   }, []);
 
+  // Flattened into one wall rather than a section per player -- each player
+  // can display at most 2, so per-player sections would mostly just be
+  // single tiles stacked vertically for no reason.
+  const tiles = galleries.flatMap((g) =>
+    g.paintings.map((painting) => ({ painting, playerName: g.playerName }))
+  );
+
   return (
     <div className="max-w-3xl mx-auto mt-10 space-y-6 text-center">
       <h2 className="text-xl font-bold">Gallery</h2>
       <p className="text-sm text-gray-500">
-        A public space — every player's currently displayed Masterpiece Paintings. The rest of
-        everyone's inventory stays private.
+        A public space — every player's currently displayed Masterpiece Paintings (up to 2 each).
+        The rest of everyone's inventory stays private.
       </p>
 
       {error && <p className="text-red-600 text-sm">{error}</p>}
 
-      {galleries.length === 0 ? (
+      {tiles.length === 0 ? (
         <p className="text-gray-400 text-sm">No one has anything on display right now.</p>
       ) : (
-        <ul className="space-y-6">
-          {galleries.map((g) => (
-            <li key={g.playerId} className="space-y-2">
-              <p className="font-semibold">{g.playerName}'s Gallery</p>
-              {/* Placeholder swatch in the painting's block color until real artwork exists. */}
-              <div className="flex flex-wrap justify-center gap-3">
-                {g.paintings.map((painting) => (
-                  <div
-                    key={painting.id}
-                    className={`w-24 h-24 flex items-center justify-center rounded p-3 text-center text-xs font-semibold shadow ${ITEM_BLOCK_COLORS.painting}`}
-                  >
-                    {ITEM_DISPLAY_NAMES.painting}
-                  </div>
-                ))}
+        <div className="flex flex-wrap justify-center gap-4">
+          {/* Placeholder swatch in the painting's block color until real artwork exists. */}
+          {tiles.map(({ painting, playerName }) => (
+            <div key={painting.id} className="space-y-1">
+              <div
+                className={`w-24 h-24 flex items-center justify-center rounded p-3 text-center text-xs font-semibold shadow ${ITEM_BLOCK_COLORS.painting}`}
+              >
+                {ITEM_DISPLAY_NAMES.painting}
               </div>
-            </li>
+              <p className="text-xs text-gray-500 truncate">{playerName}</p>
+            </div>
           ))}
-        </ul>
+        </div>
       )}
     </div>
   );
