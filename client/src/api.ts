@@ -99,6 +99,7 @@ export function fetchMessages(playerId: string, otherPlayerId: string) {
   return request<{ messages: DirectMessage[] }>(`/messages/${otherPlayerId}`, playerId);
 }
 
-export function fetchProfile(targetPlayerId: string) {
-  return request<PublicProfile>(`/profile/${targetPlayerId}`, null);
+/** viewerPlayerId identifies the caller so the server can reveal your own anonymous entries to you -- pass your own id even when viewing someone else's profile. */
+export function fetchProfile(targetPlayerId: string, viewerPlayerId: string) {
+  return request<PublicProfile>(`/profile/${targetPlayerId}`, viewerPlayerId);
 }

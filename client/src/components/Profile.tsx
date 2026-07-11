@@ -26,25 +26,25 @@ export default function Profile({ viewPlayerId }: { viewPlayerId?: string }) {
   const isSelf = !!player && targetId === player.id;
 
   useEffect(() => {
-    if (!targetId) return;
+    if (!targetId || !player) return;
     setData(null);
-    fetchProfile(targetId)
+    fetchProfile(targetId, player.id)
       .then((d) => {
         setData(d);
         setError(null);
       })
       .catch((err) => setError(err instanceof Error ? err.message : "Failed to load profile."));
-  }, [targetId]);
+  }, [targetId, player?.id]);
 
   if (!player) return null;
   if (!data) return <div className="max-w-3xl mx-auto mt-10 text-center text-gray-400">{error ?? "Loading..."}</div>;
 
   const displayedGold = isSelf ? player.gold : data.estimatedGold;
   const entered = data.history.length;
-  const wins = data.history.filter((h) => h.won).length;
+  const wins = data.history.filter((h) => h.won === true).length;
   const winRate = entered > 0 ? Math.round((wins / entered) * 100) : 0;
   const totalSpent = data.history.reduce(
-    (sum, h) => sum + h.entryFee + (h.won && h.finalPrice != null ? h.finalPrice : 0),
+    (sum, h) => sum + (h.entryFee ?? 0) + (h.won && h.finalPrice != null ? h.finalPrice : 0),
     0
   );
 
@@ -88,6 +88,7 @@ export default function Profile({ viewPlayerId }: { viewPlayerId?: string }) {
               <thead className="bg-gray-100 text-left text-gray-500">
                 <tr>
                   <th className="p-2">Date</th>
+                  <th className="p-2">Auction</th>
                   <th className="p-2">Item</th>
                   <th className="p-2">Result</th>
                   <th className="p-2">Price</th>
@@ -97,9 +98,12 @@ export default function Profile({ viewPlayerId }: { viewPlayerId?: string }) {
                 {data.history.map((h) => (
                   <tr key={h.roomId} className="border-t">
                     <td className="p-2 text-gray-600 whitespace-nowrap">{formatDate(h.joinedAt)}</td>
-                    <td className="p-2">{h.itemLabel}</td>
+                    <td className="p-2">{h.auctionType}</td>
+                    <td className="p-2">{h.itemLabel ?? <span className="text-gray-400">Unknown</span>}</td>
                     <td className="p-2">
-                      {h.endedAt === null ? (
+                      {h.won === null ? (
+                        <span className="text-gray-400">Unknown</span>
+                      ) : h.endedAt === null ? (
                         <span className="text-gray-400">In progress</span>
                       ) : h.won ? (
                         <span className="text-green-600 font-semibold">Won</span>
@@ -107,7 +111,15 @@ export default function Profile({ viewPlayerId }: { viewPlayerId?: string }) {
                         <span className="text-gray-500">Entered only</span>
                       )}
                     </td>
-                    <td className="p-2">{h.won && h.finalPrice != null ? `${h.finalPrice}g` : "—"}</td>
+                    <td className="p-2">
+                      {h.won === null ? (
+                        <span className="text-gray-400">Unknown</span>
+                      ) : h.won && h.finalPrice != null ? (
+                        `${h.finalPrice}g`
+                      ) : (
+                        "—"
+                      )}
+                    </td>
                   </tr>
                 ))}
               </tbody>

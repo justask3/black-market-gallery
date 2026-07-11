@@ -92,12 +92,14 @@ export interface DirectMessage {
 
 export interface AuctionHistoryEntry {
   roomId: string;
-  tierLabel: string;
-  itemLabel: string;
-  entryFee: number;
+  auctionType: string;
   joinedAt: number;
+  anonymous: boolean;
+  // Redacted to null for anonymous entries when viewing someone else's profile.
+  itemLabel: string | null;
+  entryFee: number | null;
   endedAt: number | null;
-  won: boolean;
+  won: boolean | null;
   finalPrice: number | null;
 }
 

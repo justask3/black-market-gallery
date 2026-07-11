@@ -172,23 +172,24 @@ export class AuctionManager {
     debit(player, fee);
     room.addParticipant(player, mode === "anonymous");
 
-    // Anonymous joins are deliberately excluded from the persisted history:
-    // paying the anonymous fee is specifically to keep a participation
-    // untraceable, including retrospectively via a player's public profile.
-    if (mode !== "anonymous") {
-      addAuctionHistoryEntry({
-        id: crypto.randomUUID(),
-        playerId: player.id,
-        roomId: room.id,
-        tierLabel: tier.label,
-        itemLabel: room.itemLabel,
-        entryFee: fee,
-        joinedAt: Date.now(),
-        endedAt: null,
-        won: false,
-        finalPrice: null,
-      });
-    }
+    // Anonymous joins are now recorded too, just flagged -- the profile
+    // route redacts everything except the date and auction type for
+    // anyone but the player themselves, rather than omitting the
+    // participation entirely.
+    const auctionType = room.sellerId ? "Player's Auction" : tier.label;
+    addAuctionHistoryEntry({
+      id: crypto.randomUUID(),
+      playerId: player.id,
+      roomId: room.id,
+      auctionType,
+      itemLabel: room.itemLabel,
+      entryFee: fee,
+      joinedAt: Date.now(),
+      endedAt: null,
+      won: false,
+      finalPrice: null,
+      anonymous: mode === "anonymous",
+    });
     return { joined: true };
   }
 
