@@ -1,12 +1,14 @@
 import { useEffect, useState } from "react";
 import { fetchPublicGallery } from "../api";
+import { InventoryItem } from "../types";
+import { ITEM_BLOCK_COLORS, ITEM_DISPLAY_NAMES } from "../itemNames";
 
 const REFRESH_POLL_MS = 60 * 1000;
 
 interface GalleryEntry {
   playerId: string;
   playerName: string;
-  paintings: unknown[];
+  paintings: InventoryItem[];
 }
 
 export default function Gallery() {
@@ -43,11 +45,19 @@ export default function Gallery() {
       ) : (
         <ul className="space-y-2">
           {galleries.map((g) => (
-            <li key={g.playerId} className="border rounded p-4 bg-white">
+            <li key={g.playerId} className="border rounded p-4 bg-white space-y-2">
               <p className="font-semibold">{g.playerName}'s Gallery</p>
-              <p className="text-sm text-gray-600 mt-1">
-                {g.paintings.length} Masterpiece Painting{g.paintings.length === 1 ? "" : "s"} on display.
-              </p>
+              {/* Placeholder swatch in the painting's block color until real artwork exists. */}
+              <div className="grid grid-cols-3 sm:grid-cols-4 gap-2">
+                {g.paintings.map((painting) => (
+                  <div
+                    key={painting.id}
+                    className={`rounded p-3 text-center text-xs font-semibold shadow ${ITEM_BLOCK_COLORS.painting}`}
+                  >
+                    {ITEM_DISPLAY_NAMES.painting}
+                  </div>
+                ))}
+              </div>
             </li>
           ))}
         </ul>
