@@ -79,7 +79,7 @@ export function registerSocketHandlers(
         socket.emit("auction:bidRejected", { roomId, reason: "Room not found or auction already ended." });
         return;
       }
-      const result = room.placeBid(player, amount);
+      const result = auctionManager.placeBid(player, roomId, amount);
       if (!result.accepted) {
         socket.emit("auction:bidRejected", { roomId, reason: result.reason });
         return;

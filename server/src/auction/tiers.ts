@@ -76,10 +76,3 @@ export const AUCTION_TIERS: Record<AuctionTierId, AuctionTierConfig> = {
 };
 
 export const AUCTION_TIER_ORDER: AuctionTierId[] = ["common", "rare", "exotic"];
-
-/**
- * Explicit global cap, kept separate from the sum of per-tier caps (currently
- * 2+1+1=4) so it stays meaningful if individual tier caps are tuned later
- * without silently changing the launch-scale room budget.
- */
-export const MAX_CONCURRENT_ROOMS_GLOBAL = 4;

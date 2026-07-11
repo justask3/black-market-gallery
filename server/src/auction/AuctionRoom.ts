@@ -159,16 +159,29 @@ export class AuctionRoom {
    * immediately if it doesn't clear the current price, or if the bidder
    * could not afford it were they to win (gold - amount >= -1000).
    * No gold is deducted here — only the eventual winner pays, at end().
+   *
+   * `reservedElsewhere` is the bidder's total leading-bid exposure in every
+   * OTHER live room (tracked by AuctionManager, which is the only caller of
+   * this method) -- folding it into the affordability check is what stops a
+   * player from being the leading bidder in more than one room for more
+   * gold than they actually have, since bids aren't escrowed individually.
    */
-  placeBid(player: Player, amount: number): { accepted: boolean; reason?: string } {
+  placeBid(
+    player: Player,
+    amount: number,
+    reservedElsewhere: number = 0
+  ): { accepted: boolean; reason?: string } {
     if (this.phase === "ended") {
       return { accepted: false, reason: "Auction has already ended." };
+    }
+    if (!this.participants.has(player.id)) {
+      return { accepted: false, reason: "You must join this room before bidding." };
     }
     const minAllowed = this.currentPrice + getMinIncrement(this.currentPrice);
     if (amount < minAllowed) {
       return { accepted: false, reason: `Bid must be at least ${minAllowed}g.` };
     }
-    if (!canAfford(player, amount)) {
+    if (!canAfford(player, amount + reservedElsewhere)) {
       return { accepted: false, reason: "Not enough gold." };
     }
 

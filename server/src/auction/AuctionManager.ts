@@ -59,6 +59,8 @@ export class AuctionManager {
   private roomTier: Map<string, AuctionTierId> = new Map();
   private commonQueue: QueuedListing[] = [];
   private nextSpawnAt: Map<AuctionTierId, number> = new Map();
+  /** playerId -> roomId -> the amount they're currently the leading bidder for. See totalCommitted. */
+  private commitments: Map<string, Map<string, number>> = new Map();
 
   constructor(io: SocketIOServer) {
     this.io = io;
@@ -157,6 +159,11 @@ export class AuctionManager {
     if (!room || !tierId || room.phase === "ended") {
       return { joined: false, reason: "Room not found or auction already ended." };
     }
+    // Already a participant -- idempotent no-op rather than charging the
+    // entry fee again for a redundant join (e.g. a duplicate client event).
+    if (room.participants.has(player.id)) {
+      return { joined: true };
+    }
     const tier = AUCTION_TIERS[tierId];
     const fee = mode === "anonymous" ? tier.entryFeeAnonymous : tier.entryFeePublic;
     if (!canAfford(player, fee)) {
@@ -165,6 +172,59 @@ export class AuctionManager {
     debit(player, fee);
     room.addParticipant(player, mode === "anonymous");
     return { joined: true };
+  }
+
+  /**
+   * Places a bid on behalf of a player, enforcing cross-room affordability:
+   * since a bid only reserves gold once the room ends (see AuctionRoom),
+   * a player leading bids in multiple concurrent rooms could otherwise
+   * commit more gold than they have. This folds every OTHER room's
+   * leading-bid exposure into the affordability check before delegating to
+   * the room's own validation, and keeps the commitment ledger in sync
+   * with who is actually leading each room afterward.
+   */
+  placeBid(player: Player, roomId: string, amount: number): { accepted: boolean; reason?: string } {
+    const room = this.rooms.get(roomId);
+    if (!room) {
+      return { accepted: false, reason: "Room not found or auction already ended." };
+    }
+
+    const previousWinnerId = room.currentWinnerId;
+    const reservedElsewhere = this.totalCommitted(player.id, roomId);
+    const result = room.placeBid(player, amount, reservedElsewhere);
+    if (!result.accepted) {
+      return result;
+    }
+
+    if (previousWinnerId && previousWinnerId !== player.id) {
+      this.clearCommitment(previousWinnerId, roomId);
+    }
+    this.setCommitment(player.id, roomId, amount);
+    return result;
+  }
+
+  /** Sum of a player's leading-bid exposure across every room except `excludingRoomId`. */
+  private totalCommitted(playerId: string, excludingRoomId: string): number {
+    const perRoom = this.commitments.get(playerId);
+    if (!perRoom) return 0;
+    let total = 0;
+    for (const [roomId, amount] of perRoom) {
+      if (roomId !== excludingRoomId) total += amount;
+    }
+    return total;
+  }
+
+  private setCommitment(playerId: string, roomId: string, amount: number): void {
+    let perRoom = this.commitments.get(playerId);
+    if (!perRoom) {
+      perRoom = new Map();
+      this.commitments.set(playerId, perRoom);
+    }
+    perRoom.set(roomId, amount);
+  }
+
+  private clearCommitment(playerId: string, roomId: string): void {
+    this.commitments.get(playerId)?.delete(roomId);
   }
 
   /**
@@ -267,6 +327,7 @@ export class AuctionManager {
     finalPrice: number
   ): void {
     if (winnerId) {
+      this.clearCommitment(winnerId, room.id);
       const winner = getPlayer(winnerId);
       if (winner) {
         room.settleWinner(winner);
