@@ -41,6 +41,13 @@ export function getPlayerByName(name: string): Player | undefined {
   return id ? players.get(id) : undefined;
 }
 
+/** Resets a player back to starting gold and an empty inventory -- used to keep the reserved "admin" test account in a known-good state on every login. */
+export function resetPlayerState(playerId: string): void {
+  const player = players.get(playerId);
+  if (player) player.gold = STARTING_GOLD;
+  inventories.set(playerId, []);
+}
+
 export function getInventory(playerId: string): InventoryItem[] {
   return inventories.get(playerId) ?? [];
 }

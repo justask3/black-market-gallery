@@ -1,5 +1,5 @@
 import { Router } from "express";
-import { createPlayer, getPlayerByName } from "../db/store.js";
+import { createPlayer, getPlayerByName, resetPlayerState } from "../db/store.js";
 import { seedAllItems } from "../items/adminSeed.js";
 
 export const authRouter = Router();
@@ -13,9 +13,11 @@ const ADMIN_NAME = "admin";
  * inventory) rather than minting a fresh one every time. Real authentication
  * (proper credentials, durable storage) is planned for a later stage.
  *
- * Logging in with the reserved name "admin" for the first time seeds one
- * of every item type in the game, for dev/testing. Later "admin" logins
- * just return that same seeded account, not a fresh one.
+ * The reserved name "admin" is a testing tool, not a real player account:
+ * it keeps a stable playerId across logins like everyone else, but every
+ * login resets its gold and inventory back to a full, known-good loadout
+ * (one of every item type) rather than carrying over whatever a previous
+ * test session left it in.
  */
 authRouter.post("/login", (req, res) => {
   const { name } = req.body ?? {};
@@ -24,13 +26,17 @@ authRouter.post("/login", (req, res) => {
   }
 
   const trimmedName = name.trim();
+  const isAdmin = trimmedName.toLowerCase() === ADMIN_NAME;
 
   const existing = getPlayerByName(trimmedName);
   if (existing) {
+    if (isAdmin) {
+      resetPlayerState(existing.id);
+      seedAllItems(existing.id);
+    }
     return res.json({ playerId: existing.id, name: existing.name, gold: existing.gold, isAdmin: existing.isAdmin });
   }
 
-  const isAdmin = trimmedName.toLowerCase() === ADMIN_NAME;
   const player = createPlayer(trimmedName, isAdmin);
 
   if (isAdmin) {
