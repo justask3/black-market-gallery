@@ -31,7 +31,7 @@ export default function Gallery() {
   }, []);
 
   return (
-    <div className="max-w-md mx-auto mt-10 space-y-4">
+    <div className="max-w-3xl mx-auto mt-10 space-y-6 text-center">
       <h2 className="text-xl font-bold">Gallery</h2>
       <p className="text-sm text-gray-500">
         A public space — every player's currently displayed Masterpiece Paintings. The rest of
@@ -43,16 +43,16 @@ export default function Gallery() {
       {galleries.length === 0 ? (
         <p className="text-gray-400 text-sm">No one has anything on display right now.</p>
       ) : (
-        <ul className="space-y-4">
+        <ul className="space-y-6">
           {galleries.map((g) => (
             <li key={g.playerId} className="space-y-2">
               <p className="font-semibold">{g.playerName}'s Gallery</p>
               {/* Placeholder swatch in the painting's block color until real artwork exists. */}
-              <div className="grid grid-cols-3 sm:grid-cols-4 gap-2">
+              <div className="flex flex-wrap justify-center gap-3">
                 {g.paintings.map((painting) => (
                   <div
                     key={painting.id}
-                    className={`rounded p-3 text-center text-xs font-semibold shadow ${ITEM_BLOCK_COLORS.painting}`}
+                    className={`w-24 h-24 flex items-center justify-center rounded p-3 text-center text-xs font-semibold shadow ${ITEM_BLOCK_COLORS.painting}`}
                   >
                     {ITEM_DISPLAY_NAMES.painting}
                   </div>
