@@ -45,8 +45,11 @@ export class AuctionRoom {
   private visiblePhaseEndsAt: number | null = null;
   private flickerEndsAt: number | null = null; // internal only, never exposed via getPublicState
   private readonly visibleDurationMs: number;
+  private readonly hasFlicker: boolean;
   private readonly flickerMinMs: number;
   private readonly flickerMaxMs: number;
+  /** Anti-snipe: a bid landing with less than this much time left resets the countdown to exactly this much. 0 disables it. */
+  private readonly antiSnipeMs: number;
   private onPhaseChange: (phase: AuctionPhase) => void;
   private onEnded: (winnerId: string | null, finalPrice: number) => void;
 
@@ -58,8 +61,10 @@ export class AuctionRoom {
     sellerId: string | null;
     startingPrice: number;
     visibleDurationMs: number;
+    hasFlicker: boolean;
     flickerMinMs: number;
     flickerMaxMs: number;
+    antiSnipeMs: number;
     onPhaseChange: (phase: AuctionPhase) => void;
     onEnded: (winnerId: string | null, finalPrice: number) => void;
   }) {
@@ -70,8 +75,10 @@ export class AuctionRoom {
     this.sellerId = opts.sellerId;
     this.currentPrice = opts.startingPrice;
     this.visibleDurationMs = opts.visibleDurationMs;
+    this.hasFlicker = opts.hasFlicker;
     this.flickerMinMs = opts.flickerMinMs;
     this.flickerMaxMs = opts.flickerMaxMs;
+    this.antiSnipeMs = opts.antiSnipeMs;
     this.onPhaseChange = opts.onPhaseChange;
     this.onEnded = opts.onEnded;
   }
@@ -80,7 +87,16 @@ export class AuctionRoom {
   start(): void {
     this.phase = "visible";
     this.visiblePhaseEndsAt = Date.now() + this.visibleDurationMs;
-    this.phaseTimer = setTimeout(() => this.beginFlicker(), this.visibleDurationMs);
+    this.phaseTimer = setTimeout(() => this.onVisiblePhaseExpired(), this.visibleDurationMs);
+  }
+
+  /** Either begins the flicker phase or ends the room directly, depending on hasFlicker. */
+  private onVisiblePhaseExpired(): void {
+    if (this.hasFlicker) {
+      this.beginFlicker();
+    } else {
+      this.end();
+    }
   }
 
   private beginFlicker(): void {
@@ -116,7 +132,7 @@ export class AuctionRoom {
     if (this.phase === "visible") {
       const newEndsAt = Math.max(Date.now() + MIN_DELAY_MS, (this.visiblePhaseEndsAt ?? Date.now()) + deltaMs);
       this.visiblePhaseEndsAt = newEndsAt;
-      this.phaseTimer = setTimeout(() => this.beginFlicker(), newEndsAt - Date.now());
+      this.phaseTimer = setTimeout(() => this.onVisiblePhaseExpired(), newEndsAt - Date.now());
     } else {
       const newEndsAt = Math.max(Date.now() + MIN_DELAY_MS, (this.flickerEndsAt ?? Date.now()) + deltaMs);
       this.flickerEndsAt = newEndsAt;
@@ -165,12 +181,19 @@ export class AuctionRoom {
    * this method) -- folding it into the affordability check is what stops a
    * player from being the leading bidder in more than one room for more
    * gold than they actually have, since bids aren't escrowed individually.
+   *
+   * Anti-snipe (only when antiSnipeMs > 0, see tiers.ts): a bid landing with
+   * less than antiSnipeMs left on the visible countdown resets it to exactly
+   * antiSnipeMs, so a last-second bid always leaves time for a counter-bid.
+   * This is Common Block's replacement for the unpredictable flicker phase
+   * used by tiers with hasFlicker -- the returned `timerExtended` flag tells
+   * the caller (AuctionManager) to broadcast the updated countdown.
    */
   placeBid(
     player: Player,
     amount: number,
     reservedElsewhere: number = 0
-  ): { accepted: boolean; reason?: string } {
+  ): { accepted: boolean; reason?: string; timerExtended?: boolean } {
     if (this.phase === "ended") {
       return { accepted: false, reason: "Auction has already ended." };
     }
@@ -188,7 +211,19 @@ export class AuctionRoom {
     this.currentPrice = amount;
     this.currentWinnerId = player.id;
     this.bidHistory.push({ playerId: player.id, amount, timestamp: Date.now() });
-    return { accepted: true };
+
+    let timerExtended = false;
+    if (this.phase === "visible" && this.antiSnipeMs > 0 && this.visiblePhaseEndsAt !== null) {
+      const remainingMs = this.visiblePhaseEndsAt - Date.now();
+      if (remainingMs < this.antiSnipeMs) {
+        if (this.phaseTimer) clearTimeout(this.phaseTimer);
+        this.visiblePhaseEndsAt = Date.now() + this.antiSnipeMs;
+        this.phaseTimer = setTimeout(() => this.onVisiblePhaseExpired(), this.antiSnipeMs);
+        timerExtended = true;
+      }
+    }
+
+    return { accepted: true, timerExtended };
   }
 
   /** Called by the winner-settlement step, after end(), to actually charge gold. */

@@ -219,6 +219,14 @@ export class AuctionManager {
       this.clearCommitment(previousWinnerId, roomId);
     }
     this.setCommitment(player.id, roomId, amount);
+
+    // Anti-snipe reset (Common Block) changed the countdown -- push the
+    // updated state out so every connected client's timer re-syncs.
+    if (result.timerExtended) {
+      this.io.to(roomId).emit("auction:state", room.getPublicState());
+      this.io.to(roomId).emit("auction:timerExtended", { roomId });
+    }
+
     return result;
   }
 
@@ -316,8 +324,10 @@ export class AuctionManager {
       sellerId: override?.sellerId ?? null,
       startingPrice,
       visibleDurationMs: tier.visibleDurationMs,
+      hasFlicker: tier.hasFlicker,
       flickerMinMs: tier.flickerMinMs,
       flickerMaxMs: tier.flickerMaxMs,
+      antiSnipeMs: tier.antiSnipeMs,
       onPhaseChange: (phase) => {
         this.io.to(roomId).emit("auction:phaseChanged", { roomId, phase });
       },

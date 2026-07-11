@@ -147,6 +147,9 @@ export default function AuctionRoom() {
     const onAdminAdjustRejected = ({ roomId, reason }: { roomId: string; reason: string }) => {
       if (roomId === selectedRoomId) setNotice(reason);
     };
+    const onTimerExtended = ({ roomId }: { roomId: string }) => {
+      if (roomId === selectedRoomId) setNotice("A last-second bid reset the countdown to 10s!");
+    };
     const onNotification = (n: { type: string; amountStolen: number; attackerId: string | null }) => {
       const msg =
         n.type === "dagger_blocked"
@@ -164,6 +167,7 @@ export default function AuctionRoom() {
     socket.on("auction:joinRejected", onJoinRejected);
     socket.on("auction:bidRejected", onBidRejected);
     socket.on("auction:adminAdjustRejected", onAdminAdjustRejected);
+    socket.on("auction:timerExtended", onTimerExtended);
     socket.on("player:notification", onNotification);
 
     return () => {
@@ -174,6 +178,7 @@ export default function AuctionRoom() {
       socket.off("auction:joinRejected", onJoinRejected);
       socket.off("auction:bidRejected", onBidRejected);
       socket.off("auction:adminAdjustRejected", onAdminAdjustRejected);
+      socket.off("auction:timerExtended", onTimerExtended);
       socket.off("player:notification", onNotification);
     };
   }, [socket, player?.id, selectedRoomId]);

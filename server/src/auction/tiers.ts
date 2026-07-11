@@ -15,8 +15,12 @@ export interface AuctionTierConfig {
   defaultItemType: ItemType;
   maxConcurrentRooms: number;
   visibleDurationMs: number;
+  /** False disables the flicker phase entirely -- the room ends the instant the visible timer expires. flickerMinMs/flickerMaxMs are ignored when false. */
+  hasFlicker: boolean;
   flickerMinMs: number;
   flickerMaxMs: number;
+  /** If a bid lands with less than this much time left on the visible countdown, the countdown resets to exactly this much (anti-snipe). 0 disables it. */
+  antiSnipeMs: number;
   startingPrice: number;
   entryFeePublic: number;
   entryFeeAnonymous: number;
@@ -35,8 +39,10 @@ export const AUCTION_TIERS: Record<AuctionTierId, AuctionTierConfig> = {
     defaultItemType: "common_chest",
     maxConcurrentRooms: 2,
     visibleDurationMs: 4 * 60 * 1000,
+    hasFlicker: false,
     flickerMinMs: SHARED_FLICKER_MIN_MS,
     flickerMaxMs: 60 * 1000,
+    antiSnipeMs: 10 * 1000,
     startingPrice: 100,
     entryFeePublic: 500,
     entryFeeAnonymous: 1500,
@@ -50,8 +56,10 @@ export const AUCTION_TIERS: Record<AuctionTierId, AuctionTierConfig> = {
     defaultItemType: "rare_chest",
     maxConcurrentRooms: 1,
     visibleDurationMs: 12 * 60 * 1000,
+    hasFlicker: true,
     flickerMinMs: SHARED_FLICKER_MIN_MS,
     flickerMaxMs: 3 * 60 * 1000,
+    antiSnipeMs: 0,
     startingPrice: 1000,
     entryFeePublic: 2000,
     entryFeeAnonymous: 5000,
@@ -65,8 +73,10 @@ export const AUCTION_TIERS: Record<AuctionTierId, AuctionTierConfig> = {
     defaultItemType: "exotic_chest",
     maxConcurrentRooms: 1,
     visibleDurationMs: 25 * 60 * 1000,
+    hasFlicker: true,
     flickerMinMs: SHARED_FLICKER_MIN_MS,
     flickerMaxMs: 5 * 60 * 1000,
+    antiSnipeMs: 0,
     startingPrice: 10000,
     entryFeePublic: 10000,
     entryFeeAnonymous: 25000,
