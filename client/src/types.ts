@@ -89,3 +89,21 @@ export interface DirectMessage {
   body: string;
   timestamp: number;
 }
+
+export interface AuctionHistoryEntry {
+  roomId: string;
+  tierLabel: string;
+  itemLabel: string;
+  entryFee: number;
+  joinedAt: number;
+  endedAt: number | null;
+  won: boolean;
+  finalPrice: number | null;
+}
+
+export interface PublicProfile {
+  playerId: string;
+  playerName: string;
+  estimatedGold: number;
+  history: AuctionHistoryEntry[];
+}

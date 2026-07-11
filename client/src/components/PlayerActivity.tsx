@@ -1,8 +1,9 @@
 import { useEffect, useState } from "react";
 import { useSession } from "../SessionContext";
-import { fetchPlayerActivity, fetchInventory, fetchGallery } from "../api";
-import { PlayerActivityEntry, InventoryItem, DaggerMetadata, DirectMessage } from "../types";
+import { fetchPlayerActivity, fetchInventory } from "../api";
+import { PlayerActivityEntry, DaggerMetadata, DirectMessage } from "../types";
 import ChatPanel from "./ChatPanel";
+import Profile from "./Profile";
 
 const REFRESH_POLL_MS = 60 * 1000;
 const TOAST_DURATION_MS = 6000;
@@ -25,8 +26,7 @@ export default function PlayerActivity() {
   const { player, socket } = useSession();
   const [players, setPlayers] = useState<PlayerActivityEntry[]>([]);
   const [myDaggerItemId, setMyDaggerItemId] = useState<string | null>(null);
-  const [expandedProfileId, setExpandedProfileId] = useState<string | null>(null);
-  const [profiles, setProfiles] = useState<Record<string, { playerName: string; paintings: InventoryItem[] }>>({});
+  const [viewingProfileId, setViewingProfileId] = useState<string | null>(null);
   const [chatTarget, setChatTarget] = useState<{ id: string; name: string } | null>(null);
   const [message, setMessage] = useState<string | null>(null);
   const [toasts, setToasts] = useState<MessageToast[]>([]);
@@ -109,19 +109,6 @@ export default function PlayerActivity() {
 
   if (!player) return null;
 
-  const toggleProfile = (id: string) => {
-    if (expandedProfileId === id) {
-      setExpandedProfileId(null);
-      return;
-    }
-    setExpandedProfileId(id);
-    if (!profiles[id]) {
-      fetchGallery(id)
-        .then((data) => setProfiles((prev) => ({ ...prev, [id]: data })))
-        .catch(() => {});
-    }
-  };
-
   const useDagger = (targetId: string) => {
     if (!socket || !myDaggerItemId) return;
     socket.emit("dagger:use", { targetPlayerId: targetId, itemId: myDaggerItemId });
@@ -163,7 +150,7 @@ export default function PlayerActivity() {
             <div className="flex gap-1 mt-1 ml-4">
               <button
                 className="text-xs bg-gray-200 rounded px-2 py-0.5"
-                onClick={() => toggleProfile(p.id)}
+                onClick={() => setViewingProfileId(p.id)}
               >
                 Profile
               </button>
@@ -183,19 +170,6 @@ export default function PlayerActivity() {
               )}
             </div>
 
-            {expandedProfileId === p.id && (
-              <div className="mt-2 ml-4 border-t pt-2 text-xs text-gray-600">
-                {profiles[p.id] ? (
-                  profiles[p.id].paintings.length === 0 ? (
-                    <p>No Paintings currently on display.</p>
-                  ) : (
-                    <p>{profiles[p.id].paintings.length} Masterpiece Painting(s) on display.</p>
-                  )
-                ) : (
-                  <p>Loading...</p>
-                )}
-              </div>
-            )}
           </li>
         ))}
       </ul>
@@ -206,6 +180,25 @@ export default function PlayerActivity() {
           targetName={chatTarget.name}
           onClose={() => setChatTarget(null)}
         />
+      )}
+
+      {viewingProfileId && (
+        <div
+          className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4 overflow-y-auto"
+          onClick={() => setViewingProfileId(null)}
+        >
+          <div
+            className="bg-gray-50 rounded shadow-lg max-w-3xl w-full max-h-[85vh] overflow-y-auto p-4"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="flex justify-end">
+              <button className="text-gray-500 text-sm" onClick={() => setViewingProfileId(null)}>
+                ✕ Close
+              </button>
+            </div>
+            <Profile viewPlayerId={viewingProfileId} />
+          </div>
+        </div>
       )}
 
       {toasts.length > 0 && (

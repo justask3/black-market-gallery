@@ -9,6 +9,7 @@ import { attackLogRouter } from "./routes/attackLog.js";
 import { catalogRouter } from "./routes/catalog.js";
 import { buildPresenceRouter } from "./routes/presence.js";
 import { messagesRouter } from "./routes/messages.js";
+import { profileRouter } from "./routes/profile.js";
 import { AuctionManager } from "./auction/AuctionManager.js";
 import { PresenceManager } from "./presence/PresenceManager.js";
 import { registerSocketHandlers } from "./sockets/socketHandlers.js";
@@ -35,6 +36,7 @@ app.use(attackLogRouter);
 app.use(catalogRouter);
 app.use(buildPresenceRouter(presenceManager));
 app.use(messagesRouter);
+app.use(profileRouter);
 
 registerSocketHandlers(io, auctionManager, presenceManager);
 

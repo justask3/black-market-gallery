@@ -65,3 +65,23 @@ export interface DirectMessage {
   body: string;
   timestamp: number;
 }
+
+/**
+ * One player's participation in one auction room -- recorded at join time
+ * and filled in when the room ends. Only PUBLIC-mode joins are recorded
+ * (see AuctionManager.joinRoom): anonymous entry exists specifically to
+ * keep a participation untraceable, including retrospectively via a
+ * player's public profile, so it's never logged here.
+ */
+export interface AuctionHistoryEntry {
+  id: string;
+  playerId: string;
+  roomId: string;
+  tierLabel: string;
+  itemLabel: string;
+  entryFee: number;
+  joinedAt: number;
+  endedAt: number | null; // null while the room is still live
+  won: boolean;
+  finalPrice: number | null; // set once the room ends
+}

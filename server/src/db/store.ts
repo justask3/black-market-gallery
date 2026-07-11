@@ -1,4 +1,4 @@
-import { Player, InventoryItem, AttackLogEntry, DirectMessage } from "../types.js";
+import { Player, InventoryItem, AttackLogEntry, DirectMessage, AuctionHistoryEntry } from "../types.js";
 
 /**
  * Plain in-memory store standing in for PostgreSQL at this stage (Option B,
@@ -13,8 +13,9 @@ export const players = new Map<string, Player>();
 export const inventories = new Map<string, InventoryItem[]>(); // keyed by playerId
 export const attackLogs: AttackLogEntry[] = [];
 export const conversations = new Map<string, DirectMessage[]>(); // keyed by sorted "idA:idB"
+export const auctionHistory: AuctionHistoryEntry[] = [];
 
-const STARTING_GOLD = 10000;
+export const STARTING_GOLD = 10000;
 
 export function createPlayer(name: string, isAdmin: boolean = false): Player {
   const player: Player = {
@@ -69,4 +70,27 @@ export function addMessage(msg: DirectMessage): void {
   const list = conversations.get(key) ?? [];
   list.push(msg);
   conversations.set(key, list);
+}
+
+export function getAuctionHistoryFor(playerId: string): AuctionHistoryEntry[] {
+  return auctionHistory.filter((h) => h.playerId === playerId);
+}
+
+export function addAuctionHistoryEntry(entry: AuctionHistoryEntry): void {
+  auctionHistory.push(entry);
+}
+
+/** Fills in every participant's history entry for a room once it ends. */
+export function settleAuctionHistoryForRoom(
+  roomId: string,
+  winnerId: string | null,
+  finalPrice: number
+): void {
+  const endedAt = Date.now();
+  for (const entry of auctionHistory) {
+    if (entry.roomId !== roomId) continue;
+    entry.endedAt = endedAt;
+    entry.won = entry.playerId === winnerId;
+    entry.finalPrice = finalPrice;
+  }
 }

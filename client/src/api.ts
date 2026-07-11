@@ -7,6 +7,7 @@ import {
   CatalogItem,
   PlayerActivityEntry,
   DirectMessage,
+  PublicProfile,
 } from "./types";
 
 const API_BASE = "http://localhost:3001";
@@ -96,4 +97,8 @@ export function fetchPlayerActivity() {
 
 export function fetchMessages(playerId: string, otherPlayerId: string) {
   return request<{ messages: DirectMessage[] }>(`/messages/${otherPlayerId}`, playerId);
+}
+
+export function fetchProfile(targetPlayerId: string) {
+  return request<PublicProfile>(`/profile/${targetPlayerId}`, null);
 }

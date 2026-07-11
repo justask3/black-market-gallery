@@ -3,7 +3,7 @@ import { AuctionRoom } from "./AuctionRoom.js";
 import { AUCTION_TIERS, AUCTION_TIER_ORDER, AuctionTierId } from "./tiers.js";
 import { Player, InventoryItem, ItemType, ItemMetadata } from "../types.js";
 import { canAfford, debit, credit } from "../economy/gold.js";
-import { addItem, getPlayer } from "../db/store.js";
+import { addItem, getPlayer, addAuctionHistoryEntry, settleAuctionHistoryForRoom } from "../db/store.js";
 import { ITEM_DISPLAY_NAMES } from "../items/itemNames.js";
 
 export type EntryMode = "public" | "anonymous";
@@ -171,6 +171,24 @@ export class AuctionManager {
     }
     debit(player, fee);
     room.addParticipant(player, mode === "anonymous");
+
+    // Anonymous joins are deliberately excluded from the persisted history:
+    // paying the anonymous fee is specifically to keep a participation
+    // untraceable, including retrospectively via a player's public profile.
+    if (mode !== "anonymous") {
+      addAuctionHistoryEntry({
+        id: crypto.randomUUID(),
+        playerId: player.id,
+        roomId: room.id,
+        tierLabel: tier.label,
+        itemLabel: room.itemLabel,
+        entryFee: fee,
+        joinedAt: Date.now(),
+        endedAt: null,
+        won: false,
+        finalPrice: null,
+      });
+    }
     return { joined: true };
   }
 
@@ -326,6 +344,8 @@ export class AuctionManager {
     winnerId: string | null,
     finalPrice: number
   ): void {
+    settleAuctionHistoryForRoom(room.id, winnerId, finalPrice);
+
     if (winnerId) {
       this.clearCommitment(winnerId, room.id);
       const winner = getPlayer(winnerId);
