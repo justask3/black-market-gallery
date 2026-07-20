@@ -1,11 +1,9 @@
 /**
- * Minimum bid increment scales with the current price. Mirrored in
+ * Minimum bid increment is always 5% of the current price, rounded up to
+ * the nearest gold (floored at 1g). Mirrored in
  * server/src/auction/bidIncrement.ts, which is the source of truth
  * enforced server-side -- keep both in sync.
  */
 export function getMinIncrement(currentPrice: number): number {
-  if (currentPrice < 100) return 5;
-  if (currentPrice < 1000) return 25;
-  if (currentPrice < 10000) return 100;
-  return 500;
+  return Math.max(1, Math.ceil(currentPrice * 0.05));
 }
