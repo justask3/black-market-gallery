@@ -1,5 +1,6 @@
 import { Router } from "express";
-import { getPlayer, getAuctionHistoryFor, STARTING_GOLD } from "../db/store.js";
+import { getPlayer, getAuctionHistoryFor, getInventory, STARTING_GOLD } from "../db/store.js";
+import { WatchersTokenMetadata } from "../types.js";
 
 export const profileRouter = Router();
 
@@ -25,7 +26,21 @@ profileRouter.get("/profile/:playerId", (req, res) => {
   const player = getPlayer(req.params.playerId);
   if (!player) return res.status(404).json({ error: "Player not found." });
 
-  const isSelf = req.header("x-player-id") === player.id;
+  const viewerId = req.header("x-player-id");
+  const isSelf = viewerId === player.id;
+
+  // Watcher's Token: if the profile owner holds one, log this visit onto it
+  // (skipped for self-views -- you don't need to be told you looked at
+  // your own profile).
+  if (!isSelf && viewerId) {
+    const viewer = getPlayer(viewerId);
+    const token = getInventory(player.id).find((i) => i.itemType === "watchers_token");
+    if (viewer && token) {
+      const meta = token.metadata as WatchersTokenMetadata;
+      meta.visits.push({ viewerId: viewer.id, viewerName: viewer.name, timestamp: Date.now() });
+    }
+  }
+
   const history = getAuctionHistoryFor(player.id).sort((a, b) => b.joinedAt - a.joinedAt);
 
   let estimatedGold = STARTING_GOLD;

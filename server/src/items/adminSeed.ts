@@ -1,5 +1,6 @@
-import { InventoryItem, ItemType, DaggerMetadata, PaintingMetadata } from "../types.js";
+import { InventoryItem, ItemType } from "../types.js";
 import { addItem } from "../db/store.js";
+import { freshMetadataFor } from "./freshMetadata.js";
 
 const ALL_ITEM_TYPES: ItemType[] = [
   "common_chest",
@@ -8,6 +9,26 @@ const ALL_ITEM_TYPES: ItemType[] = [
   "painting",
   "sigil",
   "dagger",
+  "forged_seal",
+  "vault_ledger_lock",
+  "auction_insurance_token",
+  "whispering_coin",
+  "tarnished_locket",
+  "chalk_marker",
+  "twin_faced_coin",
+  "wardens_whistle",
+  "phantom_bidder",
+  "street_rumor",
+  "dull_blade",
+  "empty_frame",
+  "bent_sigil",
+  "weighted_dice",
+  "gallery_deed",
+  "watchers_token",
+  "brokers_monopoly",
+  "pickpockets_glove",
+  "grudge_ledger",
+  "oathbreakers_dagger",
 ];
 
 /**
@@ -17,18 +38,11 @@ const ALL_ITEM_TYPES: ItemType[] = [
  */
 export function seedAllItems(playerId: string): void {
   for (const itemType of ALL_ITEM_TYPES) {
-    const metadata =
-      itemType === "dagger"
-        ? ({ chargesRemaining: 2 } as DaggerMetadata)
-        : itemType === "painting"
-        ? ({ lastCollected: Date.now(), displayed: false } as PaintingMetadata)
-        : {};
-
     const item: InventoryItem = {
       id: crypto.randomUUID(),
       ownerId: playerId,
       itemType,
-      metadata,
+      metadata: freshMetadataFor(itemType),
       createdAt: Date.now(),
     };
     addItem(item);

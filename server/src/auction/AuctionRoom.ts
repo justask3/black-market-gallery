@@ -3,11 +3,12 @@ import { getMinIncrement } from "./bidIncrement.js";
 import { Player, ItemType, ItemMetadata } from "../types.js";
 
 export type AuctionPhase = "visible" | "flicker" | "ended";
+export type JoinMode = "public" | "anonymous" | "phantom";
 
 export interface Participant {
   playerId: string;
-  displayName: string; // actual name, or "Anonymous" for display purposes
-  isAnonymous: boolean;
+  displayName: string; // actual name, "Anonymous", or a Phantom Bidder persona
+  isAnonymous: boolean; // true for both "anonymous" and "phantom" -- phantom is cosmetically distinct, functionally identical
 }
 
 export interface Bid {
@@ -15,6 +16,19 @@ export interface Bid {
   amount: number;
   timestamp: number;
 }
+
+const PHANTOM_ADJECTIVES = ["Shadowy", "Crimson", "Silent", "Masked", "Velvet", "Gilded", "Whispering", "Hollow"];
+const PHANTOM_NOUNS = ["Fox", "Raven", "Merchant", "Collector", "Wanderer", "Broker", "Specter", "Magpie"];
+
+function generatePhantomName(): string {
+  const adjective = PHANTOM_ADJECTIVES[Math.floor(Math.random() * PHANTOM_ADJECTIVES.length)];
+  const noun = PHANTOM_NOUNS[Math.floor(Math.random() * PHANTOM_NOUNS.length)];
+  const suffix = Math.floor(1000 + Math.random() * 9000);
+  return `The ${adjective} ${noun} #${suffix}`;
+}
+
+/** How close to the visible-phase deadline an insured leading bidder must be outbid to qualify for a refund at settlement. */
+const LATE_OUTBID_WINDOW_MS = 30 * 1000;
 
 /**
  * Owns a single live auction's state and timing.
@@ -40,6 +54,14 @@ export class AuctionRoom {
 
   participants: Map<string, Participant> = new Map();
   bidHistory: Bid[] = [];
+
+  /** Broker's Monopoly: players barred from bidding further in this specific room. */
+  readonly blockedPlayerIds: Set<string> = new Set();
+  /** Whispering Coin: armed-by playerId, consumed the next time someone joins anonymously (or as a Phantom Bidder). */
+  private pendingWhisper: string | null = null;
+  /** Auction Insurance Token: who paid the premium, and who (among the insured) got outbid within LATE_OUTBID_WINDOW_MS of the deadline. AuctionManager reads both at settlement to apply refunds. */
+  readonly insuredPlayerIds: Set<string> = new Set();
+  readonly lateOutbidPlayerIds: Set<string> = new Set();
 
   private phaseTimer: ReturnType<typeof setTimeout> | null = null;
   private visiblePhaseEndsAt: number | null = null;
@@ -150,20 +172,51 @@ export class AuctionRoom {
   }
 
   /**
-   * Attempts to join the room. Caller (socket handler) is responsible for
-   * having already charged the entry fee via the economy module before
-   * calling this — this method only tracks room membership/display state.
+   * Attempts to join the room. Caller (AuctionManager) is responsible for
+   * having already charged the entry fee (and any Insurance premium) via
+   * the economy module before calling this — this method only tracks room
+   * membership/display state.
+   *
+   * Returns the Whispering Coin armer's playerId if this join (anonymous
+   * or phantom) just consumed a pending whisper, so the caller can notify
+   * them with this player's real identity -- AuctionRoom itself has no
+   * access to the socket layer to do that notification directly.
    */
-  addParticipant(player: Player, isAnonymous: boolean): void {
-    this.participants.set(player.id, {
-      playerId: player.id,
-      displayName: isAnonymous ? "Anonymous" : player.name,
-      isAnonymous,
-    });
+  addParticipant(player: Player, mode: JoinMode): { whisperRevealedTo: string | null } {
+    const isAnonymous = mode !== "public";
+    const displayName = mode === "public" ? player.name : mode === "phantom" ? generatePhantomName() : "Anonymous";
+
+    this.participants.set(player.id, { playerId: player.id, displayName, isAnonymous });
+
+    let whisperRevealedTo: string | null = null;
+    if (isAnonymous && this.pendingWhisper && this.pendingWhisper !== player.id) {
+      whisperRevealedTo = this.pendingWhisper;
+      this.pendingWhisper = null;
+    }
+    return { whisperRevealedTo };
   }
 
   isAnonymous(playerId: string): boolean {
     return this.participants.get(playerId)?.isAnonymous ?? false;
+  }
+
+  /** Whispering Coin: arms this room so the next anonymous/phantom joiner gets revealed to armedByPlayerId. */
+  armWhisperingCoin(armedByPlayerId: string): void {
+    this.pendingWhisper = armedByPlayerId;
+  }
+
+  /** Broker's Monopoly: bars a current participant from placing any further bids in this room. */
+  blockParticipant(targetPlayerId: string): { blocked: boolean; reason?: string } {
+    if (!this.participants.has(targetPlayerId)) {
+      return { blocked: false, reason: "That player is not currently in this room." };
+    }
+    this.blockedPlayerIds.add(targetPlayerId);
+    return { blocked: true };
+  }
+
+  /** Auction Insurance Token: marks a participant as insured for this room (premium already charged by the caller). */
+  markInsured(playerId: string): void {
+    this.insuredPlayerIds.add(playerId);
   }
 
   /**
@@ -200,6 +253,9 @@ export class AuctionRoom {
     if (!this.participants.has(player.id)) {
       return { accepted: false, reason: "You must join this room before bidding." };
     }
+    if (this.blockedPlayerIds.has(player.id)) {
+      return { accepted: false, reason: "You've been blocked from bidding in this room." };
+    }
     const minAllowed = this.currentPrice + getMinIncrement(this.currentPrice);
     if (amount < minAllowed) {
       return { accepted: false, reason: `Bid must be at least ${minAllowed}g.` };
@@ -208,9 +264,25 @@ export class AuctionRoom {
       return { accepted: false, reason: "Not enough gold." };
     }
 
+    const previousWinnerId = this.currentWinnerId;
     this.currentPrice = amount;
     this.currentWinnerId = player.id;
     this.bidHistory.push({ playerId: player.id, amount, timestamp: Date.now() });
+
+    // Auction Insurance Token: flag the just-outbid leading bidder for a
+    // refund at settlement if they're insured and this happened within
+    // the late window -- checked against the countdown as it stood before
+    // any anti-snipe reset below.
+    if (
+      previousWinnerId &&
+      previousWinnerId !== player.id &&
+      this.insuredPlayerIds.has(previousWinnerId) &&
+      this.phase === "visible" &&
+      this.visiblePhaseEndsAt !== null &&
+      this.visiblePhaseEndsAt - Date.now() < LATE_OUTBID_WINDOW_MS
+    ) {
+      this.lateOutbidPlayerIds.add(previousWinnerId);
+    }
 
     let timerExtended = false;
     if (this.phase === "visible" && this.antiSnipeMs > 0 && this.visiblePhaseEndsAt !== null) {
@@ -242,7 +314,12 @@ export class AuctionRoom {
       // once flicker begins, since the flicker end time must never be
       // knowable to clients.
       visiblePhaseEndsAt: this.phase === "visible" ? this.visiblePhaseEndsAt : null,
+      // playerId is only exposed for non-anonymous participants -- their
+      // identity is already fully public via displayName, so this isn't a
+      // new leak. Anonymous/phantom participants stay unidentifiable, which
+      // also means Broker's Monopoly can only ever target a public bidder.
       participants: Array.from(this.participants.values()).map((p) => ({
+        playerId: p.isAnonymous ? null : p.playerId,
         displayName: p.displayName,
       })),
     };

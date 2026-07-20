@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import { useSession } from "../SessionContext";
-import { fetchAuctionRooms } from "../api";
-import { AuctionRoomSummary, AuctionTierSummary, AuctionTierId } from "../types";
+import { fetchAuctionRooms, fetchInventory } from "../api";
+import { AuctionRoomSummary, AuctionTierSummary, AuctionTierId, InventoryItem } from "../types";
 import { getMinIncrement } from "../bidIncrement";
 
 const ROOM_LIST_POLL_MS = 15 * 1000;
@@ -73,6 +73,9 @@ export default function AuctionRoom() {
   const [bidAmount, setBidAmount] = useState("");
   const [notice, setNotice] = useState<string | null>(null);
   const [notifications, setNotifications] = useState<string[]>([]);
+  const [useInsurance, setUseInsurance] = useState(false);
+  const [myItems, setMyItems] = useState<InventoryItem[]>([]);
+  const [brokersMonopolyTarget, setBrokersMonopolyTarget] = useState("");
 
   const countdown = useCountdown(state?.visiblePhaseEndsAt ?? null);
 
@@ -84,6 +87,17 @@ export default function AuctionRoom() {
       })
       .catch(() => {});
   };
+
+  const refreshMyItems = () => {
+    if (!player) return;
+    fetchInventory(player.id)
+      .then(({ inventory }) => setMyItems(inventory))
+      .catch(() => {});
+  };
+
+  useEffect(() => {
+    refreshMyItems();
+  }, [player?.id]);
 
   // Poll the room list only while browsing it (no room selected) — there's
   // no dedicated "room list changed" socket broadcast in this design.
@@ -100,6 +114,7 @@ export default function AuctionRoom() {
     const onState = (s: AuctionRoomSummary) => {
       if (s.id !== selectedRoomId) return;
       setState(s);
+      refreshMyItems(); // a join or item use may have just consumed something
     };
     const onPhaseChanged = ({ roomId, phase }: { roomId: string; phase: string }) => {
       if (roomId !== selectedRoomId) return;
@@ -150,11 +165,28 @@ export default function AuctionRoom() {
     const onTimerExtended = ({ roomId }: { roomId: string }) => {
       if (roomId === selectedRoomId) setNotice("A last-second bid reset the countdown to 10s!");
     };
+    const onItemActionRejected = ({ roomId, reason }: { roomId: string; reason: string }) => {
+      if (roomId === selectedRoomId) setNotice(reason);
+    };
+    const onWhisperRevealed = ({
+      roomId,
+      playerName,
+    }: {
+      roomId: string;
+      playerId: string;
+      playerName: string;
+    }) => {
+      if (roomId === selectedRoomId) {
+        setNotifications((list) => [`Your Whispering Coin revealed an anonymous bidder: ${playerName}.`, ...list]);
+      }
+    };
     const onNotification = (n: { type: string; amountStolen: number; attackerId: string | null }) => {
       const msg =
         n.type === "dagger_blocked"
-          ? `Your Sigil deflected an attack from ${n.attackerId ?? "someone"}!`
-          : `You were struck by a Dagger and lost ${n.amountStolen}g${
+          ? `A defense deflected an attack from ${n.attackerId ?? "someone"}!`
+          : n.type === "dagger_backfired"
+          ? `Your attack backfired — you lost ${n.amountStolen}g to your target instead.`
+          : `You were struck and lost ${n.amountStolen}g${
               n.attackerId ? ` to ${n.attackerId}` : " (attacker unknown)"
             }.`;
       setNotifications((list) => [msg, ...list]);
@@ -168,6 +200,8 @@ export default function AuctionRoom() {
     socket.on("auction:bidRejected", onBidRejected);
     socket.on("auction:adminAdjustRejected", onAdminAdjustRejected);
     socket.on("auction:timerExtended", onTimerExtended);
+    socket.on("auction:itemActionRejected", onItemActionRejected);
+    socket.on("auction:whisperRevealed", onWhisperRevealed);
     socket.on("player:notification", onNotification);
 
     return () => {
@@ -179,6 +213,8 @@ export default function AuctionRoom() {
       socket.off("auction:bidRejected", onBidRejected);
       socket.off("auction:adminAdjustRejected", onAdminAdjustRejected);
       socket.off("auction:timerExtended", onTimerExtended);
+      socket.off("auction:itemActionRejected", onItemActionRejected);
+      socket.off("auction:whisperRevealed", onWhisperRevealed);
       socket.off("player:notification", onNotification);
     };
   }, [socket, player?.id, selectedRoomId]);
@@ -189,6 +225,7 @@ export default function AuctionRoom() {
     setJoined(false);
     setNotice(null);
     setBidAmount("");
+    setUseInsurance(false);
   };
 
   const backToList = () => {
@@ -200,9 +237,9 @@ export default function AuctionRoom() {
     refreshRooms();
   };
 
-  const join = (mode: "public" | "anonymous") => {
+  const join = (mode: "public" | "anonymous" | "phantom", insurance = false) => {
     if (!socket || !selectedRoomId) return;
-    socket.emit("auction:join", { roomId: selectedRoomId, mode });
+    socket.emit("auction:join", { roomId: selectedRoomId, mode, useInsurance: insurance });
     setJoined(true);
   };
 
@@ -219,6 +256,25 @@ export default function AuctionRoom() {
   const adjustTime = (deltaMs: number) => {
     if (!socket || !selectedRoomId) return;
     socket.emit("auction:adminAdjustTime", { roomId: selectedRoomId, deltaMs });
+  };
+
+  const useWhisperingCoin = () => {
+    if (!socket || !selectedRoomId) return;
+    const item = myItems.find((i) => i.itemType === "whispering_coin");
+    if (!item) return;
+    socket.emit("auction:useWhisperingCoin", { roomId: selectedRoomId, itemId: item.id });
+  };
+
+  const useBrokersMonopoly = () => {
+    if (!socket || !selectedRoomId || !brokersMonopolyTarget) return;
+    const item = myItems.find((i) => i.itemType === "brokers_monopoly");
+    if (!item) return;
+    socket.emit("auction:useBrokersMonopoly", {
+      roomId: selectedRoomId,
+      itemId: item.id,
+      targetPlayerId: brokersMonopolyTarget,
+    });
+    setBrokersMonopolyTarget("");
   };
 
   if (selectedRoomId === null || !state) {
@@ -263,6 +319,14 @@ export default function AuctionRoom() {
 
   const minIncrement = getMinIncrement(state.currentPrice ?? 0);
   const quickBidAmount = (state.currentPrice ?? 0) + minIncrement;
+
+  const hasPhantomBidder = myItems.some((i) => i.itemType === "phantom_bidder");
+  const hasInsuranceToken = myItems.some((i) => i.itemType === "auction_insurance_token");
+  const hasWhisperingCoin = myItems.some((i) => i.itemType === "whispering_coin");
+  const hasBrokersMonopoly = myItems.some((i) => i.itemType === "brokers_monopoly");
+  const otherPublicParticipants = (state.participants ?? []).filter(
+    (p) => p.playerId && p.playerId !== player?.id
+  );
 
   return (
     <div className="max-w-md mx-auto mt-10 space-y-4">
@@ -317,13 +381,27 @@ export default function AuctionRoom() {
       )}
 
       {!joined && state.phase !== "ended" && (
-        <div className="space-x-2">
-          <button className="bg-gray-800 text-white rounded px-4 py-2" onClick={() => join("public")}>
-            Join ({state.entryFeePublic}g, public)
-          </button>
-          <button className="bg-gray-600 text-white rounded px-4 py-2" onClick={() => join("anonymous")}>
-            Join Anonymously ({state.entryFeeAnonymous}g)
-          </button>
+        <div className="space-y-2">
+          <div className="flex flex-wrap gap-2 items-center">
+            <button className="bg-gray-800 text-white rounded px-4 py-2" onClick={() => join("public", useInsurance)}>
+              Join ({state.entryFeePublic}g, public)
+            </button>
+            <button className="bg-gray-600 text-white rounded px-4 py-2" onClick={() => join("anonymous")}>
+              Join Anonymously ({state.entryFeeAnonymous}g)
+            </button>
+            {hasPhantomBidder && (
+              <button className="bg-sky-800 text-white rounded px-4 py-2" onClick={() => join("phantom")}>
+                Join as Phantom Bidder
+              </button>
+            )}
+          </div>
+          {hasInsuranceToken && (
+            <label className="flex items-center gap-2 text-sm text-gray-600">
+              <input type="checkbox" checked={useInsurance} onChange={(e) => setUseInsurance(e.target.checked)} />
+              Use Auction Insurance Token with the public join (+50% premium, refunds half your fee if you're
+              outbid late)
+            </label>
+          )}
         </div>
       )}
 
@@ -350,6 +428,39 @@ export default function AuctionRoom() {
               Bid Custom
             </button>
           </div>
+
+          {(hasWhisperingCoin || hasBrokersMonopoly) && (
+            <div className="border border-sky-300 bg-sky-50 rounded p-3 space-y-2">
+              <p className="text-xs font-semibold text-sky-800">Room items</p>
+              {hasWhisperingCoin && (
+                <button className="bg-sky-800 text-white rounded px-3 py-1 text-sm" onClick={useWhisperingCoin}>
+                  Use Whispering Coin
+                </button>
+              )}
+              {hasBrokersMonopoly && (
+                <div className="flex gap-2">
+                  <select
+                    className="border rounded px-2 py-1 text-sm flex-1"
+                    value={brokersMonopolyTarget}
+                    onChange={(e) => setBrokersMonopolyTarget(e.target.value)}
+                  >
+                    <option value="">Choose a public bidder...</option>
+                    {otherPublicParticipants.map((p) => (
+                      <option key={p.playerId} value={p.playerId ?? ""}>
+                        {p.displayName}
+                      </option>
+                    ))}
+                  </select>
+                  <button
+                    className="bg-fuchsia-800 text-white rounded px-3 py-1 text-sm"
+                    onClick={useBrokersMonopoly}
+                  >
+                    Block
+                  </button>
+                </div>
+              )}
+            </div>
+          )}
         </div>
       )}
 

@@ -2,7 +2,7 @@ import { Server as SocketIOServer, Socket } from "socket.io";
 import { AuctionManager } from "../auction/AuctionManager.js";
 import { PresenceManager } from "../presence/PresenceManager.js";
 import { getPlayer, getInventory, addAttackLog, addMessage } from "../db/store.js";
-import { resolveDaggerAttack } from "../items/dagger.js";
+import { resolveWeaponAttack, isWeaponItemType } from "../items/weapon.js";
 import { Player, DirectMessage } from "../types.js";
 
 declare module "socket.io" {
@@ -62,16 +62,27 @@ export function registerSocketHandlers(
       io.to(`player:${toId}`).emit("message:new", { ...msg, fromName: player.name });
     });
 
-    socket.on("auction:join", ({ roomId, mode }: { roomId: string; mode: "public" | "anonymous" }) => {
-      const result = auctionManager.joinRoom(player, roomId, mode);
-      if (!result.joined) {
-        socket.emit("auction:joinRejected", { roomId, reason: result.reason });
-        return;
+    socket.on(
+      "auction:join",
+      ({
+        roomId,
+        mode,
+        useInsurance,
+      }: {
+        roomId: string;
+        mode: "public" | "anonymous" | "phantom";
+        useInsurance?: boolean;
+      }) => {
+        const result = auctionManager.joinRoom(player, roomId, mode, useInsurance ?? false);
+        if (!result.joined) {
+          socket.emit("auction:joinRejected", { roomId, reason: result.reason });
+          return;
+        }
+        const room = auctionManager.getRoom(roomId)!;
+        socket.join(room.id);
+        io.to(room.id).emit("auction:state", room.getPublicState());
       }
-      const room = auctionManager.getRoom(roomId)!;
-      socket.join(room.id);
-      io.to(room.id).emit("auction:state", room.getPublicState());
-    });
+    );
 
     socket.on("auction:bid", ({ roomId, amount }: { roomId: string; amount: number }) => {
       const room = auctionManager.getRoom(roomId);
@@ -108,6 +119,25 @@ export function registerSocketHandlers(
       }
     });
 
+    /** Whispering Coin: arm the room the player is in so the next anonymous/phantom joiner gets revealed to them. */
+    socket.on("auction:useWhisperingCoin", ({ roomId, itemId }: { roomId: string; itemId: string }) => {
+      const result = auctionManager.useWhisperingCoin(player, roomId, itemId);
+      if (!result.used) {
+        socket.emit("auction:itemActionRejected", { roomId, reason: result.reason });
+      }
+    });
+
+    /** Broker's Monopoly: bar a named current participant from further bids in this room. */
+    socket.on(
+      "auction:useBrokersMonopoly",
+      ({ roomId, itemId, targetPlayerId }: { roomId: string; itemId: string; targetPlayerId: string }) => {
+        const result = auctionManager.useBrokersMonopoly(player, roomId, itemId, targetPlayerId);
+        if (!result.used) {
+          socket.emit("auction:itemActionRejected", { roomId, reason: result.reason });
+        }
+      }
+    );
+
     socket.on(
       "dagger:use",
       ({ targetPlayerId, itemId }: { targetPlayerId: string; itemId: string }) => {
@@ -118,11 +148,11 @@ export function registerSocketHandlers(
         }
 
         const attackerInventory = getInventory(player.id);
-        const daggerItem = attackerInventory.find(
-          (i) => i.id === itemId && i.itemType === "dagger"
+        const weaponItem = attackerInventory.find(
+          (i) => i.id === itemId && isWeaponItemType(i.itemType)
         );
-        if (!daggerItem) {
-          socket.emit("dagger:rejected", { reason: "Dagger not found in your inventory." });
+        if (!weaponItem) {
+          socket.emit("dagger:rejected", { reason: "Weapon not found in your inventory." });
           return;
         }
 
@@ -130,7 +160,7 @@ export function registerSocketHandlers(
         const attackerIsAnonymousInThisRoom = !!sharedRoom && sharedRoom.isAnonymous(player.id);
 
         const targetInventory = getInventory(target.id);
-        const result = resolveDaggerAttack(player, target, daggerItem, targetInventory, {
+        const result = resolveWeaponAttack(player, target, weaponItem, targetInventory, attackerInventory, {
           attackerIsAnonymousInThisRoom,
         });
 
@@ -141,19 +171,32 @@ export function registerSocketHandlers(
 
         if (result.logEntry) addAttackLog(result.logEntry);
 
-        // Confirmation back to the attacker (always visible to themselves).
+        // Confirmation back to whoever used the weapon (always visible to
+        // themselves, even on a backfire).
         socket.emit("dagger:result", {
           outcome: result.outcome,
           amountStolen: result.amountStolen ?? 0,
         });
 
-        // Notification to the victim — identity included only if the
-        // logic decided it should be revealed (see resolveDaggerAttack).
-        io.to(`player:${target.id}`).emit("player:notification", {
-          type: result.outcome === "blocked" ? "dagger_blocked" : "dagger_hit",
-          amountStolen: result.amountStolen ?? 0,
-          attackerId: result.logEntry?.attackerId ?? null,
-        });
+        // Notification to whoever actually lost gold -- on a normal hit or
+        // block that's the target, but on a backfire (Oathbreaker's
+        // Dagger) the roles reverse, so this is read off the log entry's
+        // own victim/attacker fields rather than assumed from the original
+        // target. Identity is included only if the logic decided it
+        // should be revealed (see resolveWeaponAttack).
+        if (result.logEntry) {
+          const notificationType =
+            result.outcome === "blocked"
+              ? "dagger_blocked"
+              : result.outcome === "backfired"
+              ? "dagger_backfired"
+              : "dagger_hit";
+          io.to(`player:${result.logEntry.victimId}`).emit("player:notification", {
+            type: notificationType,
+            amountStolen: result.amountStolen ?? 0,
+            attackerId: result.logEntry.attackerId,
+          });
+        }
       }
     );
   });

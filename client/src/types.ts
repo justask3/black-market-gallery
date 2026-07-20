@@ -5,9 +5,30 @@ export type ItemType =
   | "painting"
   | "sigil"
   | "dagger"
-  | "bleeding_coin";
+  | "bleeding_coin"
+  | "forged_seal"
+  | "vault_ledger_lock"
+  | "auction_insurance_token"
+  | "whispering_coin"
+  | "tarnished_locket"
+  | "chalk_marker"
+  | "twin_faced_coin"
+  | "wardens_whistle"
+  | "phantom_bidder"
+  | "street_rumor"
+  | "dull_blade"
+  | "empty_frame"
+  | "bent_sigil"
+  | "weighted_dice"
+  | "gallery_deed"
+  | "watchers_token"
+  | "brokers_monopoly"
+  | "pickpockets_glove"
+  | "grudge_ledger"
+  | "oathbreakers_dagger";
 
-export interface DaggerMetadata {
+/** Weapon-family items (Dagger and its variants) all use this same shape. */
+export interface WeaponMetadata {
   chargesRemaining: number;
 }
 
@@ -20,11 +41,50 @@ export interface BleedingCoinMetadata {
   lastDrained: number;
 }
 
+export interface VaultLedgerLockMetadata {
+  lastUpkeepAt: number;
+}
+
+export interface TarnishedLocketMetadata {
+  lastCollected: number;
+}
+
+export interface EmptyFrameMetadata {
+  displayed: boolean;
+}
+
+export interface WatchersTokenMetadata {
+  visits: { viewerId: string; viewerName: string; timestamp: number }[];
+}
+
+export type ChestLootResult = { type: "gold"; amount: number } | { type: "item"; itemType: ItemType };
+
+export interface ChestMetadata {
+  pendingLoot?: ChestLootResult;
+}
+
+/** Attached to any item that's been marked with a Chalk Marker -- survives resale. */
+export interface ChalkMarkInfo {
+  history: { ownerId: string; ownerName: string; acquiredAt: number }[];
+}
+
+export type ItemMetadata = (
+  | WeaponMetadata
+  | PaintingMetadata
+  | BleedingCoinMetadata
+  | VaultLedgerLockMetadata
+  | TarnishedLocketMetadata
+  | EmptyFrameMetadata
+  | WatchersTokenMetadata
+  | ChestMetadata
+  | Record<string, never>
+) & { chalkMark?: ChalkMarkInfo };
+
 export interface InventoryItem {
   id: string;
   ownerId: string;
   itemType: ItemType;
-  metadata: DaggerMetadata | PaintingMetadata | BleedingCoinMetadata | Record<string, never>;
+  metadata: ItemMetadata;
   createdAt: number;
 }
 
@@ -33,6 +93,7 @@ export interface Player {
   name: string;
   gold: number;
   isAdmin: boolean;
+  paintingDisplayCap?: number;
 }
 
 export type AuctionPhase = "visible" | "flicker" | "ended";
@@ -49,7 +110,7 @@ export interface AuctionRoomSummary {
   phase: AuctionPhase;
   currentPrice: number;
   visiblePhaseEndsAt: number | null;
-  participants: { displayName: string }[];
+  participants: { playerId: string | null; displayName: string }[];
 }
 
 export interface AuctionTierSummary {

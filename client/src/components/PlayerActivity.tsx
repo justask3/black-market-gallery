@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import { useSession } from "../SessionContext";
 import { fetchPlayerActivity, fetchInventory } from "../api";
-import { PlayerActivityEntry, DaggerMetadata, DirectMessage } from "../types";
+import { PlayerActivityEntry, WeaponMetadata, DirectMessage } from "../types";
 import ChatPanel from "./ChatPanel";
 import Profile from "./Profile";
 
@@ -42,7 +42,7 @@ export default function PlayerActivity() {
     fetchInventory(player.id)
       .then(({ inventory }) => {
         const dagger = inventory.find(
-          (i) => i.itemType === "dagger" && (i.metadata as DaggerMetadata).chargesRemaining > 0
+          (i) => i.itemType === "dagger" && (i.metadata as WeaponMetadata).chargesRemaining > 0
         );
         setMyDaggerItemId(dagger?.id ?? null);
       })

@@ -1,12 +1,20 @@
 import { Server as SocketIOServer } from "socket.io";
-import { AuctionRoom } from "./AuctionRoom.js";
+import { AuctionRoom, JoinMode } from "./AuctionRoom.js";
 import { AUCTION_TIERS, AUCTION_TIER_ORDER, AuctionTierId } from "./tiers.js";
 import { Player, InventoryItem, ItemType, ItemMetadata } from "../types.js";
 import { canAfford, debit, credit } from "../economy/gold.js";
-import { addItem, getPlayer, addAuctionHistoryEntry, settleAuctionHistoryForRoom } from "../db/store.js";
+import {
+  addItem,
+  getPlayer,
+  getInventory,
+  removeItem,
+  addAuctionHistoryEntry,
+  settleAuctionHistoryForRoom,
+} from "../db/store.js";
 import { ITEM_DISPLAY_NAMES } from "../items/itemNames.js";
+import { recordChalkMarkTransfer } from "../items/chalkMark.js";
 
-export type EntryMode = "public" | "anonymous";
+export type EntryMode = JoinMode;
 
 interface QueuedListing {
   startingPrice: number;
@@ -32,7 +40,7 @@ export interface AuctionRoomSummary {
   phase: string;
   currentPrice: number;
   visiblePhaseEndsAt: number | null;
-  participants: { displayName: string }[];
+  participants: { playerId: string | null; displayName: string }[];
 }
 
 export interface AuctionTierSummary {
@@ -150,10 +158,18 @@ export class AuctionManager {
 
   /**
    * Charges the entry fee (per the room's tier) and adds the player to it.
+   * `mode: "phantom"` requires and consumes a Phantom Bidder item;
+   * `useInsurance` (public joins only) requires and consumes an Auction
+   * Insurance Token, charging a 50% premium on top of the entry fee.
    * Returns a result rather than throwing, so the socket handler can relay a
    * clean rejection reason to the client.
    */
-  joinRoom(player: Player, roomId: string, mode: EntryMode): { joined: boolean; reason?: string } {
+  joinRoom(
+    player: Player,
+    roomId: string,
+    mode: EntryMode,
+    useInsurance: boolean = false
+  ): { joined: boolean; reason?: string } {
     const room = this.rooms.get(roomId);
     const tierId = this.roomTier.get(roomId);
     if (!room || !tierId || room.phase === "ended") {
@@ -165,16 +181,56 @@ export class AuctionManager {
       return { joined: true };
     }
     const tier = AUCTION_TIERS[tierId];
-    const fee = mode === "anonymous" ? tier.entryFeeAnonymous : tier.entryFeePublic;
-    if (!canAfford(player, fee)) {
+    const fee = mode === "public" ? tier.entryFeePublic : tier.entryFeeAnonymous;
+
+    const inventory = getInventory(player.id);
+
+    let phantomItem: InventoryItem | undefined;
+    if (mode === "phantom") {
+      phantomItem = inventory.find((i) => i.itemType === "phantom_bidder");
+      if (!phantomItem) {
+        return { joined: false, reason: "You don't have a Phantom Bidder to use." };
+      }
+    }
+
+    let insuranceItem: InventoryItem | undefined;
+    if (useInsurance) {
+      if (mode !== "public") {
+        return { joined: false, reason: "Auction Insurance only applies to public entries." };
+      }
+      insuranceItem = inventory.find((i) => i.itemType === "auction_insurance_token");
+      if (!insuranceItem) {
+        return { joined: false, reason: "You don't have an Auction Insurance Token to use." };
+      }
+    }
+
+    const insurancePremium = useInsurance ? Math.ceil(tier.entryFeePublic * 0.5) : 0;
+    const totalCost = fee + insurancePremium;
+    if (!canAfford(player, totalCost)) {
       return { joined: false, reason: "Not enough gold to cover the entry fee." };
     }
-    debit(player, fee);
-    room.addParticipant(player, mode === "anonymous");
 
-    // Anonymous joins are now recorded too, just flagged -- the profile
-    // route redacts everything except the date and auction type for
-    // anyone but the player themselves, rather than omitting the
+    debit(player, totalCost);
+    if (phantomItem) removeItem(player.id, phantomItem.id);
+    if (insuranceItem) removeItem(player.id, insuranceItem.id);
+
+    const { whisperRevealedTo } = room.addParticipant(player, mode);
+    if (useInsurance) room.markInsured(player.id);
+
+    // Whispering Coin: someone armed this room, and this join (anonymous
+    // or phantom) just consumed it -- privately reveal this player's real
+    // identity to whoever armed it.
+    if (whisperRevealedTo) {
+      this.io.to(`player:${whisperRevealedTo}`).emit("auction:whisperRevealed", {
+        roomId,
+        playerId: player.id,
+        playerName: player.name,
+      });
+    }
+
+    // Anonymous/phantom joins are now recorded too, just flagged -- the
+    // profile route redacts everything except the date and auction type
+    // for anyone but the player themselves, rather than omitting the
     // participation entirely.
     const auctionType = room.sellerId ? "Player's Auction" : tier.label;
     addAuctionHistoryEntry({
@@ -188,9 +244,57 @@ export class AuctionManager {
       endedAt: null,
       won: false,
       finalPrice: null,
-      anonymous: mode === "anonymous",
+      anonymous: mode !== "public",
     });
     return { joined: true };
+  }
+
+  /** Whispering Coin: arms the room the player is currently in, consuming the item. */
+  useWhisperingCoin(player: Player, roomId: string, itemId: string): { used: boolean; reason?: string } {
+    const room = this.rooms.get(roomId);
+    if (!room || room.phase === "ended") {
+      return { used: false, reason: "Room not found or auction already ended." };
+    }
+    if (!room.participants.has(player.id)) {
+      return { used: false, reason: "You must be in this room to use that." };
+    }
+    const item = getInventory(player.id).find((i) => i.id === itemId && i.itemType === "whispering_coin");
+    if (!item) {
+      return { used: false, reason: "Whispering Coin not found in your inventory." };
+    }
+    removeItem(player.id, item.id);
+    room.armWhisperingCoin(player.id);
+    return { used: true };
+  }
+
+  /** Broker's Monopoly: bars one other current participant from further bids in this room, consuming the item. */
+  useBrokersMonopoly(
+    player: Player,
+    roomId: string,
+    itemId: string,
+    targetPlayerId: string
+  ): { used: boolean; reason?: string } {
+    const room = this.rooms.get(roomId);
+    if (!room || room.phase === "ended") {
+      return { used: false, reason: "Room not found or auction already ended." };
+    }
+    if (!room.participants.has(player.id)) {
+      return { used: false, reason: "You must be in this room to use that." };
+    }
+    if (targetPlayerId === player.id) {
+      return { used: false, reason: "Cannot target yourself." };
+    }
+    const item = getInventory(player.id).find((i) => i.id === itemId && i.itemType === "brokers_monopoly");
+    if (!item) {
+      return { used: false, reason: "Broker's Monopoly not found in your inventory." };
+    }
+    const result = room.blockParticipant(targetPlayerId);
+    if (!result.blocked) {
+      return { used: false, reason: result.reason };
+    }
+    removeItem(player.id, item.id);
+    this.io.to(roomId).emit("auction:state", room.getPublicState());
+    return { used: true };
   }
 
   /**
@@ -371,6 +475,13 @@ export class AuctionManager {
         };
         addItem(awardedItem);
 
+        // Chalk-marked items carry their history in metadata, which
+        // already passed through unchanged above -- just append the
+        // winner as its new owner.
+        if (awardedItem.metadata.chalkMark) {
+          recordChalkMarkTransfer(awardedItem.metadata.chalkMark, winner);
+        }
+
         // Server-owned filler rooms have no seller -- the winning bid is
         // just the cost of participating, same as before. A relisted
         // item's seller is paid the winning bid, same as any real auction.
@@ -379,6 +490,19 @@ export class AuctionManager {
           if (seller) credit(seller, finalPrice);
         }
       }
+    }
+
+    // Auction Insurance Token: refund insured players who were leading and
+    // got outbid within the late window, as long as they didn't go on to
+    // win anyway. Insurance only ever applies to public entries, so the
+    // refund is always half of that tier's public entry fee.
+    const tier = AUCTION_TIERS[tierId];
+    for (const playerId of room.lateOutbidPlayerIds) {
+      if (playerId === winnerId) continue;
+      if (!room.insuredPlayerIds.has(playerId)) continue;
+      const insuredPlayer = getPlayer(playerId);
+      if (!insuredPlayer) continue;
+      credit(insuredPlayer, Math.ceil(tier.entryFeePublic * 0.5));
     }
 
     this.io.to(room.id).emit("auction:ended", { roomId: room.id, winnerId, finalPrice });

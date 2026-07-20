@@ -1,10 +1,34 @@
 import { useEffect, useState, useCallback } from "react";
 import { useSession } from "../SessionContext";
-import { fetchInventory, openChest, relistChest, displayPainting, undisplayPainting } from "../api";
-import { InventoryItem, ItemType, DaggerMetadata, PaintingMetadata } from "../types";
+import {
+  fetchInventory,
+  openChest,
+  relistChest,
+  displayPainting,
+  undisplayPainting,
+  useChalkMarker,
+  flipCoin,
+  useStreetRumor,
+  useGalleryDeed,
+} from "../api";
+import {
+  InventoryItem,
+  ItemType,
+  WeaponMetadata,
+  PaintingMetadata,
+  EmptyFrameMetadata,
+  WatchersTokenMetadata,
+  ChestMetadata,
+} from "../types";
 import { ITEM_DISPLAY_NAMES, ITEM_BLOCK_COLORS } from "../itemNames";
 
 const CHEST_ITEM_TYPES: ItemType[] = ["common_chest", "rare_chest", "exotic_chest"];
+const WEAPON_ITEM_TYPES: ItemType[] = ["dagger", "dull_blade", "pickpockets_glove", "oathbreakers_dagger"];
+const DISPLAYABLE_ITEM_TYPES: ItemType[] = ["painting", "empty_frame"];
+
+function formatTime(ms: number): string {
+  return new Date(ms).toLocaleString();
+}
 
 export default function Inventory() {
   const { player, setPlayer, socket } = useSession();
@@ -12,6 +36,8 @@ export default function Inventory() {
   const [message, setMessage] = useState<string | null>(null);
   const [relistPriceById, setRelistPriceById] = useState<Record<string, string>>({});
   const [daggerTargetById, setDaggerTargetById] = useState<Record<string, string>>({});
+  const [chalkTargetById, setChalkTargetById] = useState<Record<string, string>>({});
+  const [rumorChestById, setRumorChestById] = useState<Record<string, string>>({});
   const [selectedItemId, setSelectedItemId] = useState<string | null>(null);
 
   const refresh = useCallback(async () => {
@@ -25,16 +51,18 @@ export default function Inventory() {
     refresh();
   }, [refresh]);
 
-  // Listen for Dagger outcomes / notifications so the inventory (charges,
-  // gold) stays in sync without requiring a manual refresh, and so the
-  // attacker actually sees what happened (or why it was rejected).
+  // Listen for Dagger-family outcomes / notifications so the inventory
+  // (charges, gold) stays in sync without requiring a manual refresh, and
+  // so the attacker actually sees what happened (or why it was rejected).
   useEffect(() => {
     if (!socket) return;
-    const onDaggerResult = (r: { outcome: "success" | "blocked"; amountStolen: number }) => {
+    const onDaggerResult = (r: { outcome: "success" | "blocked" | "backfired"; amountStolen: number }) => {
       setMessage(
         r.outcome === "success"
-          ? `Dagger attack succeeded — you stole ${r.amountStolen}g!`
-          : "Dagger attack was blocked by the target's Sigil."
+          ? `Attack succeeded — you stole ${r.amountStolen}g!`
+          : r.outcome === "backfired"
+          ? `It backfired! You lost ${r.amountStolen}g to your target instead.`
+          : "Attack was blocked by the target's defense."
       );
       refresh();
     };
@@ -88,7 +116,7 @@ export default function Inventory() {
   };
 
   const handleDisplayToggle = async (item: InventoryItem) => {
-    const meta = item.metadata as PaintingMetadata;
+    const meta = item.metadata as PaintingMetadata | EmptyFrameMetadata;
     try {
       if (meta.displayed) {
         await undisplayPainting(player.id, item.id);
@@ -101,14 +129,68 @@ export default function Inventory() {
     }
   };
 
-  const handleUseDagger = (item: InventoryItem) => {
+  const handleUseWeapon = (item: InventoryItem) => {
     const targetPlayerId = daggerTargetById[item.id]?.trim();
     if (!targetPlayerId || !socket) {
       setMessage("Enter a target player ID first.");
       return;
     }
     socket.emit("dagger:use", { targetPlayerId, itemId: item.id });
-    setMessage("Dagger used — check the result shortly.");
+    setMessage("Attack used — check the result shortly.");
+  };
+
+  const handleChalkMark = async (item: InventoryItem) => {
+    const targetItemId = chalkTargetById[item.id];
+    if (!targetItemId) {
+      setMessage("Pick an item to mark first.");
+      return;
+    }
+    try {
+      await useChalkMarker(player.id, item.id, targetItemId);
+      setMessage("Item marked — its ownership history will now be tracked.");
+      setSelectedItemId(null);
+      refresh();
+    } catch (err) {
+      setMessage(err instanceof Error ? err.message : "Failed to mark item.");
+    }
+  };
+
+  const handleFlipCoin = async (item: InventoryItem) => {
+    try {
+      const result = await flipCoin(player.id, item.id);
+      setMessage(result.won ? `The coin favored you — +${result.amount}g!` : `The coin turned on you — -${result.amount}g.`);
+      setSelectedItemId(null);
+      refresh();
+    } catch (err) {
+      setMessage(err instanceof Error ? err.message : "Failed to flip the coin.");
+    }
+  };
+
+  const handleStreetRumor = async (item: InventoryItem) => {
+    const chestItemId = rumorChestById[item.id];
+    if (!chestItemId) {
+      setMessage("Pick a chest first.");
+      return;
+    }
+    try {
+      const result = await useStreetRumor(player.id, item.id, chestItemId);
+      setMessage(`Word on the street: that chest holds something in the "${result.category}" category.`);
+      setSelectedItemId(null);
+      refresh();
+    } catch (err) {
+      setMessage(err instanceof Error ? err.message : "Failed to use Street Rumor.");
+    }
+  };
+
+  const handleGalleryDeed = async (item: InventoryItem) => {
+    try {
+      await useGalleryDeed(player.id, item.id);
+      setMessage("Your display cap is now 3.");
+      setSelectedItemId(null);
+      refresh();
+    } catch (err) {
+      setMessage(err instanceof Error ? err.message : "Failed to use the Gallery Deed.");
+    }
   };
 
   return (
@@ -142,7 +224,7 @@ export default function Inventory() {
           onClick={() => setSelectedItemId(null)}
         >
           <div
-            className="bg-white rounded shadow-lg max-w-sm w-full p-5 space-y-3"
+            className="bg-white rounded shadow-lg max-w-sm w-full p-5 space-y-3 max-h-[85vh] overflow-y-auto"
             onClick={(e) => e.stopPropagation()}
           >
             <div className="flex justify-between items-start">
@@ -156,6 +238,9 @@ export default function Inventory() {
 
             {CHEST_ITEM_TYPES.includes(selectedItem.itemType) && (
               <div>
+                {(selectedItem.metadata as ChestMetadata).pendingLoot && (
+                  <p className="text-xs text-gray-500 mb-1">A Street Rumor has already revealed this chest's category.</p>
+                )}
                 <button
                   className="bg-gray-800 text-white text-sm rounded px-3 py-1"
                   onClick={() => handleOpen(selectedItem)}
@@ -165,27 +250,168 @@ export default function Inventory() {
               </div>
             )}
 
-            {selectedItem.itemType === "painting" && (
+            {DISPLAYABLE_ITEM_TYPES.includes(selectedItem.itemType) && (
               <div>
                 <p className="text-sm text-gray-500">
                   Status:{" "}
-                  {(selectedItem.metadata as PaintingMetadata).displayed
-                    ? "Displayed (earning)"
-                    : "Stored (not earning)"}
+                  {(selectedItem.metadata as PaintingMetadata | EmptyFrameMetadata).displayed
+                    ? selectedItem.itemType === "painting"
+                      ? "Displayed (earning)"
+                      : "Displayed (padding your gallery, earns nothing)"
+                    : "Stored (not displayed)"}
                 </p>
                 <button
                   className="mt-1 bg-gray-800 text-white text-sm rounded px-3 py-1"
                   onClick={() => handleDisplayToggle(selectedItem)}
                 >
-                  {(selectedItem.metadata as PaintingMetadata).displayed ? "Undisplay" : "Display"}
+                  {(selectedItem.metadata as PaintingMetadata | EmptyFrameMetadata).displayed ? "Undisplay" : "Display"}
                 </button>
               </div>
             )}
 
             {selectedItem.itemType === "sigil" && (
+              <p className="text-sm text-gray-500">Passive — deflects the next attack against you and reveals the attacker.</p>
+            )}
+            {selectedItem.itemType === "bent_sigil" && (
+              <p className="text-sm text-gray-500">Passive — deflects the next attack against you, but never reveals the attacker.</p>
+            )}
+            {selectedItem.itemType === "forged_seal" && (
               <p className="text-sm text-gray-500">
-                Passive — deflects the next Dagger attempt against you.
+                Passive — a counterfeit ward. 70% chance to deflect the next attack against you like a real Sigil; 30% chance it silently fails.
               </p>
+            )}
+            {selectedItem.itemType === "vault_ledger_lock" && (
+              <p className="text-sm text-gray-500">
+                Passive — reduces any percent-based theft against you by 3 points. Costs 1% of your gold every 24h to maintain.
+              </p>
+            )}
+            {selectedItem.itemType === "wardens_whistle" && (
+              <p className="text-sm text-gray-500">Passive — always reveals an attacker's identity when they hit you, even if anonymous.</p>
+            )}
+            {selectedItem.itemType === "grudge_ledger" && (
+              <p className="text-sm text-gray-500">
+                Passive — when you attack someone who has stolen from you before, your steal chance gets a bonus against them.
+              </p>
+            )}
+            {selectedItem.itemType === "weighted_dice" && (
+              <p className="text-sm text-gray-500">Passive — improves the Twin-Faced Coin's odds in your favor while held.</p>
+            )}
+            {selectedItem.itemType === "tarnished_locket" && (
+              <p className="text-sm text-gray-500">Passive income — 50g every 24 hours. No display slot needed.</p>
+            )}
+            {selectedItem.itemType === "auction_insurance_token" && (
+              <p className="text-sm text-gray-500">Used when joining an auction publicly — look for the Insurance option in the Auction Room.</p>
+            )}
+            {selectedItem.itemType === "phantom_bidder" && (
+              <p className="text-sm text-gray-500">Used when joining an auction — look for the Phantom option in the Auction Room.</p>
+            )}
+            {selectedItem.itemType === "whispering_coin" && (
+              <p className="text-sm text-gray-500">Used from inside a live auction room — look for the option there while you're a participant.</p>
+            )}
+            {selectedItem.itemType === "brokers_monopoly" && (
+              <p className="text-sm text-gray-500">Used from inside a live auction room — look for the option there while you're a participant.</p>
+            )}
+
+            {selectedItem.itemType === "watchers_token" && (
+              <div className="space-y-1">
+                <p className="text-sm text-gray-500">Passive — logs who looks up your public profile.</p>
+                {(selectedItem.metadata as WatchersTokenMetadata).visits.length === 0 ? (
+                  <p className="text-xs text-gray-400">No visits logged yet.</p>
+                ) : (
+                  <ul className="text-xs text-gray-600 space-y-0.5 max-h-32 overflow-y-auto">
+                    {(selectedItem.metadata as WatchersTokenMetadata).visits
+                      .slice()
+                      .reverse()
+                      .map((v, i) => (
+                        <li key={i}>
+                          {v.viewerName} — {formatTime(v.timestamp)}
+                        </li>
+                      ))}
+                  </ul>
+                )}
+              </div>
+            )}
+
+            {selectedItem.itemType === "twin_faced_coin" && (
+              <div>
+                <p className="text-sm text-gray-500 mb-1">Flip for a fixed 200g stake — 50/50 to double it or lose it.</p>
+                <button className="bg-yellow-600 text-white text-sm rounded px-3 py-1" onClick={() => handleFlipCoin(selectedItem)}>
+                  Flip
+                </button>
+              </div>
+            )}
+
+            {selectedItem.itemType === "gallery_deed" && (
+              <div>
+                <p className="text-sm text-gray-500 mb-1">Permanently raises your display cap from 2 to 3.</p>
+                <button className="bg-fuchsia-700 text-white text-sm rounded px-3 py-1" onClick={() => handleGalleryDeed(selectedItem)}>
+                  Use
+                </button>
+              </div>
+            )}
+
+            {selectedItem.itemType === "chalk_marker" && (
+              <div className="space-y-2">
+                <p className="text-sm text-gray-500">Mark another item to start tracking its ownership history.</p>
+                {items.filter((i) => i.id !== selectedItem.id).length === 0 ? (
+                  <p className="text-xs text-gray-400">You have no other items to mark.</p>
+                ) : (
+                  <>
+                    <select
+                      className="border rounded px-2 py-1 text-sm w-full"
+                      value={chalkTargetById[selectedItem.id] ?? ""}
+                      onChange={(e) => setChalkTargetById((s) => ({ ...s, [selectedItem.id]: e.target.value }))}
+                    >
+                      <option value="">Choose an item...</option>
+                      {items
+                        .filter((i) => i.id !== selectedItem.id)
+                        .map((i) => (
+                          <option key={i.id} value={i.id}>
+                            {ITEM_DISPLAY_NAMES[i.itemType]}
+                          </option>
+                        ))}
+                    </select>
+                    <button
+                      className="bg-stone-600 text-white text-sm rounded px-3 py-1"
+                      onClick={() => handleChalkMark(selectedItem)}
+                    >
+                      Mark
+                    </button>
+                  </>
+                )}
+              </div>
+            )}
+
+            {selectedItem.itemType === "street_rumor" && (
+              <div className="space-y-2">
+                <p className="text-sm text-gray-500">Pick an unopened chest to reveal its category ahead of time.</p>
+                {items.filter((i) => CHEST_ITEM_TYPES.includes(i.itemType) && !(i.metadata as ChestMetadata).pendingLoot).length === 0 ? (
+                  <p className="text-xs text-gray-400">You have no unrevealed chests.</p>
+                ) : (
+                  <>
+                    <select
+                      className="border rounded px-2 py-1 text-sm w-full"
+                      value={rumorChestById[selectedItem.id] ?? ""}
+                      onChange={(e) => setRumorChestById((s) => ({ ...s, [selectedItem.id]: e.target.value }))}
+                    >
+                      <option value="">Choose a chest...</option>
+                      {items
+                        .filter((i) => CHEST_ITEM_TYPES.includes(i.itemType) && !(i.metadata as ChestMetadata).pendingLoot)
+                        .map((i) => (
+                          <option key={i.id} value={i.id}>
+                            {ITEM_DISPLAY_NAMES[i.itemType]}
+                          </option>
+                        ))}
+                    </select>
+                    <button
+                      className="bg-stone-600 text-white text-sm rounded px-3 py-1"
+                      onClick={() => handleStreetRumor(selectedItem)}
+                    >
+                      Reveal Category
+                    </button>
+                  </>
+                )}
+              </div>
             )}
 
             {selectedItem.itemType === "bleeding_coin" && (
@@ -195,12 +421,15 @@ export default function Inventory() {
               </p>
             )}
 
-            {selectedItem.itemType === "dagger" && (
+            {WEAPON_ITEM_TYPES.includes(selectedItem.itemType) && (
               <div className="space-y-2">
                 <p className="text-sm text-gray-500">
-                  Charges remaining: {(selectedItem.metadata as DaggerMetadata).chargesRemaining}
+                  Charges remaining: {(selectedItem.metadata as WeaponMetadata).chargesRemaining}
                 </p>
-                {(selectedItem.metadata as DaggerMetadata).chargesRemaining > 0 && (
+                {selectedItem.itemType === "oathbreakers_dagger" && (
+                  <p className="text-xs text-amber-700">About 1 in 7 uses backfires and steals from you instead.</p>
+                )}
+                {(selectedItem.metadata as WeaponMetadata).chargesRemaining > 0 && (
                   <>
                     <input
                       className="border rounded px-2 py-1 text-sm w-full"
@@ -212,12 +441,25 @@ export default function Inventory() {
                     />
                     <button
                       className="bg-red-700 text-white text-sm rounded px-3 py-1"
-                      onClick={() => handleUseDagger(selectedItem)}
+                      onClick={() => handleUseWeapon(selectedItem)}
                     >
-                      Use Dagger
+                      Use
                     </button>
                   </>
                 )}
+              </div>
+            )}
+
+            {selectedItem.metadata.chalkMark && (
+              <div className="pt-2 border-t space-y-1">
+                <p className="text-xs font-semibold text-gray-600">Ownership History</p>
+                <ul className="text-xs text-gray-500 space-y-0.5">
+                  {selectedItem.metadata.chalkMark.history.map((h, i) => (
+                    <li key={i}>
+                      {h.ownerName} — {formatTime(h.acquiredAt)}
+                    </li>
+                  ))}
+                </ul>
               </div>
             )}
 

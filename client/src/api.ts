@@ -103,3 +103,33 @@ export function fetchMessages(playerId: string, otherPlayerId: string) {
 export function fetchProfile(targetPlayerId: string, viewerPlayerId: string) {
   return request<PublicProfile>(`/profile/${targetPlayerId}`, viewerPlayerId);
 }
+
+/** Chalk Marker: attaches ownership-history tracking to another of your own items, consuming the marker. */
+export function useChalkMarker(playerId: string, markerItemId: string, targetItemId: string) {
+  return request<{ marked: boolean; item: InventoryItem }>(`/items/${markerItemId}/chalk-mark`, playerId, {
+    method: "POST",
+    body: JSON.stringify({ targetItemId }),
+  });
+}
+
+/** Twin-Faced Coin: flip for a fixed stake, consumed either way. */
+export function flipCoin(playerId: string, coinItemId: string) {
+  return request<{ won: boolean; amount: number }>(`/items/${coinItemId}/flip-coin`, playerId, {
+    method: "POST",
+  });
+}
+
+/** Street Rumor: pre-rolls and locks in a specific chest's contents, revealing only its broad category. */
+export function useStreetRumor(playerId: string, rumorItemId: string, chestItemId: string) {
+  return request<{ category: string }>(`/items/${rumorItemId}/use-street-rumor`, playerId, {
+    method: "POST",
+    body: JSON.stringify({ chestItemId }),
+  });
+}
+
+/** Gallery Deed: permanently raises the display cap to 3, consuming the deed. */
+export function useGalleryDeed(playerId: string, deedItemId: string) {
+  return request<{ paintingDisplayCap: number }>(`/items/${deedItemId}/use-gallery-deed`, playerId, {
+    method: "POST",
+  });
+}

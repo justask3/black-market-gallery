@@ -78,10 +78,34 @@ db.exec(`
   );
 `);
 
+/**
+ * Idempotent schema migration for columns added after the players table
+ * already existed on disk -- CREATE TABLE IF NOT EXISTS doesn't retrofit
+ * existing tables, so new nullable columns get added here instead. Safe
+ * to run on every boot: swallows the "duplicate column" error the second
+ * time onward, rethrows anything else.
+ */
+function migrateAddColumn(table: string, column: string, definition: string): void {
+  try {
+    db.exec(`ALTER TABLE ${table} ADD COLUMN ${column} ${definition}`);
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
+    if (!message.includes("duplicate column name")) throw err;
+  }
+}
+
+migrateAddColumn("players", "painting_display_cap", "INTEGER");
+
 /** Hydrates the in-memory maps from whatever was last persisted. Runs once, at import time. */
 function loadFromDisk(): void {
   for (const row of db.prepare("SELECT * FROM players").all() as any[]) {
-    const player: Player = { id: row.id, name: row.name, gold: row.gold, isAdmin: !!row.is_admin };
+    const player: Player = {
+      id: row.id,
+      name: row.name,
+      gold: row.gold,
+      isAdmin: !!row.is_admin,
+      paintingDisplayCap: row.painting_display_cap ?? undefined,
+    };
     players.set(player.id, player);
     playerIdByName.set(player.name.toLowerCase(), player.id);
     inventories.set(player.id, []);
@@ -142,8 +166,12 @@ function persist(): void {
     db.exec("DELETE FROM messages");
     db.exec("DELETE FROM auction_history");
 
-    const insertPlayer = db.prepare("INSERT INTO players (id, name, gold, is_admin) VALUES (?, ?, ?, ?)");
-    for (const p of players.values()) insertPlayer.run(p.id, p.name, p.gold, p.isAdmin ? 1 : 0);
+    const insertPlayer = db.prepare(
+      "INSERT INTO players (id, name, gold, is_admin, painting_display_cap) VALUES (?, ?, ?, ?, ?)"
+    );
+    for (const p of players.values()) {
+      insertPlayer.run(p.id, p.name, p.gold, p.isAdmin ? 1 : 0, p.paintingDisplayCap ?? null);
+    }
 
     const insertItem = db.prepare(
       "INSERT INTO inventory_items (id, owner_id, item_type, metadata, created_at) VALUES (?, ?, ?, ?, ?)"
@@ -232,7 +260,10 @@ export function getPlayerByName(name: string): Player | undefined {
 /** Resets a player back to starting gold and an empty inventory -- used to keep the reserved "admin" test account in a known-good state on every login. */
 export function resetPlayerState(playerId: string): void {
   const player = players.get(playerId);
-  if (player) player.gold = STARTING_GOLD;
+  if (player) {
+    player.gold = STARTING_GOLD;
+    player.paintingDisplayCap = undefined;
+  }
   inventories.set(playerId, []);
 }
 

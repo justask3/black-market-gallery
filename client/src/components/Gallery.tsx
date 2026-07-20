@@ -51,13 +51,21 @@ export default function Gallery() {
         <p className="text-gray-400 text-sm">No one has anything on display right now.</p>
       ) : (
         <div className="flex flex-wrap justify-center gap-4">
-          {/* Placeholder swatch in the painting's block color until real artwork exists. */}
+          {/*
+            Placeholder swatch in the item's own block color until real
+            artwork exists. Rendered off each tile's actual itemType rather
+            than assuming "painting" -- an Empty Frame occupies a display
+            slot the same way and deliberately renders with its own label
+            here rather than being disguised as a real Painting, since the
+            bluff is about padding the gallery's apparent size, not fooling
+            a close look.
+          */}
           {tiles.map(({ painting, playerName }) => (
             <div key={painting.id} className="space-y-1">
               <div
-                className={`w-24 h-24 flex items-center justify-center rounded p-3 text-center text-xs font-semibold shadow ${ITEM_BLOCK_COLORS.painting}`}
+                className={`w-24 h-24 flex items-center justify-center rounded p-3 text-center text-xs font-semibold shadow ${ITEM_BLOCK_COLORS[painting.itemType]}`}
               >
-                {ITEM_DISPLAY_NAMES.painting}
+                {ITEM_DISPLAY_NAMES[painting.itemType]}
               </div>
               <p className="text-xs text-gray-500 truncate">{playerName}</p>
             </div>

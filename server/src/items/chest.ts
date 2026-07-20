@@ -1,52 +1,95 @@
-import { ItemType } from "../types.js";
+import { ItemType, ChestTier, ChestLootResult } from "../types.js";
 
-export type ChestTier = "common" | "rare" | "exotic";
+const COMMON_BAND: ItemType[] = [
+  "dull_blade",
+  "pickpockets_glove",
+  "bent_sigil",
+  "twin_faced_coin",
+  "weighted_dice",
+  "tarnished_locket",
+  "chalk_marker",
+  "street_rumor",
+  "empty_frame",
+  "wardens_whistle",
+];
 
-export type ChestLootResult =
-  | { type: "gold"; amount: number }
-  | { type: "item"; itemType: Extract<ItemType, "painting" | "sigil" | "dagger"> };
+const RARE_BAND: ItemType[] = [
+  "forged_seal",
+  "vault_ledger_lock",
+  "whispering_coin",
+  "phantom_bidder",
+  "watchers_token",
+  "grudge_ledger",
+  "oathbreakers_dagger",
+  "auction_insurance_token",
+];
 
-interface ChestLootTable {
-  goldChance: number;
-  goldMin: number;
-  goldMax: number;
-  paintingChance: number;
-  sigilChance: number;
-  // Remainder (1 - goldChance - paintingChance - sigilChance) goes to dagger.
+const LEGENDARY_BAND: ItemType[] = ["gallery_deed", "brokers_monopoly"];
+
+type WeightedEntry =
+  | { weight: number; kind: "gold"; min: number; max: number }
+  | { weight: number; kind: "item"; itemType: ItemType };
+
+function evenlySplit(band: ItemType[], totalWeight: number): WeightedEntry[] {
+  const perItem = totalWeight / band.length;
+  return band.map((itemType) => ({ weight: perItem, kind: "item" as const, itemType }));
 }
 
 /**
- * Loot tables per chest rarity. Odds and gold ranges escalate with rarity:
- * a Rare/Exotic Chest trades away some of the (very common) gold outcome
- * for a much better shot at painting/sigil/dagger, and a wider gold range
- * when gold does hit.
+ * Weighted-pool loot tables per chest rarity. Replaces the old fixed
+ * gold/painting/sigil/dagger chance bands now that there are ~20 more
+ * possible item outcomes -- a flat list of weighted entries scales to any
+ * number of outcomes without nested if/else chains. Odds escalate with
+ * tier: gold share drops, the existing painting/sigil/dagger pool and the
+ * new item bands both grow, and Legendaries are Exotic-only.
  */
-const LOOT_TABLES: Record<ChestTier, ChestLootTable> = {
-  common: { goldChance: 0.7, goldMin: 100, goldMax: 4000, paintingChance: 0.2, sigilChance: 0.05 },
-  rare: { goldChance: 0.5, goldMin: 500, goldMax: 8000, paintingChance: 0.3, sigilChance: 0.1 },
-  exotic: { goldChance: 0.3, goldMin: 2000, goldMax: 20000, paintingChance: 0.35, sigilChance: 0.15 },
+const LOOT_TABLES: Record<ChestTier, WeightedEntry[]> = {
+  common: [
+    { weight: 50, kind: "gold", min: 100, max: 4000 },
+    { weight: 10, kind: "item", itemType: "painting" },
+    { weight: 5, kind: "item", itemType: "sigil" },
+    { weight: 5, kind: "item", itemType: "dagger" },
+    ...evenlySplit(COMMON_BAND, 25),
+    ...evenlySplit(RARE_BAND, 5),
+  ],
+  rare: [
+    { weight: 30, kind: "gold", min: 500, max: 8000 },
+    { weight: 15, kind: "item", itemType: "painting" },
+    { weight: 8, kind: "item", itemType: "sigil" },
+    { weight: 7, kind: "item", itemType: "dagger" },
+    ...evenlySplit(COMMON_BAND, 25),
+    ...evenlySplit(RARE_BAND, 15),
+  ],
+  exotic: [
+    { weight: 15, kind: "gold", min: 2000, max: 20000 },
+    { weight: 18, kind: "item", itemType: "painting" },
+    { weight: 10, kind: "item", itemType: "sigil" },
+    { weight: 12, kind: "item", itemType: "dagger" },
+    ...evenlySplit(COMMON_BAND, 20),
+    ...evenlySplit(RARE_BAND, 20),
+    ...evenlySplit(LEGENDARY_BAND, 5),
+  ],
 };
 
-/**
- * Rolls a chest's loot table for the given rarity tier. Pure function:
- * takes no dependencies, easy to unit test independently of the
- * inventory/economy layers that consume its result.
- */
+/** Rolls a chest's loot table for the given rarity tier. Pure function, easy to test independently of the inventory/economy layers that consume its result. */
 export function rollChestLoot(tier: ChestTier): ChestLootResult {
   const table = LOOT_TABLES[tier];
-  const roll = Math.random(); // [0, 1)
+  const totalWeight = table.reduce((sum, e) => sum + e.weight, 0);
+  let roll = Math.random() * totalWeight;
 
-  if (roll < table.goldChance) {
-    const amount = Math.floor(table.goldMin + Math.random() * (table.goldMax - table.goldMin + 1));
-    return { type: "gold", amount };
+  for (const entry of table) {
+    if (roll < entry.weight) {
+      if (entry.kind === "gold") {
+        const amount = Math.floor(entry.min + Math.random() * (entry.max - entry.min + 1));
+        return { type: "gold", amount };
+      }
+      return { type: "item", itemType: entry.itemType };
+    }
+    roll -= entry.weight;
   }
-  if (roll < table.goldChance + table.paintingChance) {
-    return { type: "item", itemType: "painting" };
-  }
-  if (roll < table.goldChance + table.paintingChance + table.sigilChance) {
-    return { type: "item", itemType: "sigil" };
-  }
-  return { type: "item", itemType: "dagger" };
+
+  // Unreachable in practice (floating point rounding safety net only).
+  return { type: "gold", amount: table[0].kind === "gold" ? table[0].min : 100 };
 }
 
 /** Maps a chest's ItemType to the loot-table tier it should roll against. */
@@ -61,4 +104,37 @@ export function chestTierFor(itemType: ItemType): ChestTier {
     default:
       throw new Error(`Not a chest item type: ${itemType}`);
   }
+}
+
+/** Broad category used by Street Rumor to describe a locked-in result without revealing the exact item. */
+export function categoryFor(result: ChestLootResult): string {
+  if (result.type === "gold") return "Gold";
+
+  const categories: Partial<Record<ItemType, string>> = {
+    dagger: "Weapon",
+    dull_blade: "Weapon",
+    pickpockets_glove: "Weapon",
+    oathbreakers_dagger: "Weapon",
+    sigil: "Defense",
+    forged_seal: "Defense",
+    bent_sigil: "Defense",
+    vault_ledger_lock: "Defense",
+    wardens_whistle: "Defense",
+    painting: "Passive Income",
+    tarnished_locket: "Passive Income",
+    empty_frame: "Passive Income",
+    twin_faced_coin: "Gamble",
+    weighted_dice: "Gamble",
+    chalk_marker: "Utility",
+    street_rumor: "Utility",
+    whispering_coin: "Utility",
+    phantom_bidder: "Utility",
+    watchers_token: "Utility",
+    auction_insurance_token: "Utility",
+    grudge_ledger: "Utility",
+    gallery_deed: "Legendary",
+    brokers_monopoly: "Legendary",
+  };
+
+  return categories[result.itemType] ?? "Curio";
 }
