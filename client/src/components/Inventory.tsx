@@ -20,7 +20,7 @@ import {
   WatchersTokenMetadata,
   ChestMetadata,
 } from "../types";
-import { ITEM_DISPLAY_NAMES, ITEM_BLOCK_COLORS } from "../itemNames";
+import { ITEM_DISPLAY_NAMES, ITEM_BLOCK_COLORS, ITEM_RARITY, RARITY_LABELS, RARITY_ORDER } from "../itemNames";
 
 const CHEST_ITEM_TYPES: ItemType[] = ["common_chest", "rare_chest", "exotic_chest"];
 const WEAPON_ITEM_TYPES: ItemType[] = ["dagger", "dull_blade", "pickpockets_glove", "oathbreakers_dagger"];
@@ -206,17 +206,26 @@ export default function Inventory() {
 
       {items.length === 0 && <p className="text-gray-400">Empty. Win a Chest at auction to start.</p>}
 
-      <div className="grid grid-cols-3 sm:grid-cols-4 gap-3">
-        {items.map((item) => (
-          <button
-            key={item.id}
-            onClick={() => setSelectedItemId(item.id)}
-            className={`rounded p-3 text-center text-xs font-semibold shadow hover:opacity-90 ${ITEM_BLOCK_COLORS[item.itemType]}`}
-          >
-            {ITEM_DISPLAY_NAMES[item.itemType]}
-          </button>
-        ))}
-      </div>
+      {RARITY_ORDER.map((rarity) => {
+        const group = items.filter((item) => ITEM_RARITY[item.itemType] === rarity);
+        if (group.length === 0) return null;
+        return (
+          <div key={rarity} className="space-y-2">
+            <h3 className="text-sm font-semibold text-gray-500">{RARITY_LABELS[rarity]}</h3>
+            <div className="grid grid-cols-3 sm:grid-cols-4 gap-3">
+              {group.map((item) => (
+                <button
+                  key={item.id}
+                  onClick={() => setSelectedItemId(item.id)}
+                  className={`rounded p-3 text-center text-xs font-semibold shadow hover:opacity-90 ${ITEM_BLOCK_COLORS[item.itemType]}`}
+                >
+                  {ITEM_DISPLAY_NAMES[item.itemType]}
+                </button>
+              ))}
+            </div>
+          </div>
+        );
+      })}
 
       {selectedItem && (
         <div

@@ -31,33 +31,65 @@ export const ITEM_DISPLAY_NAMES: Record<ItemType, string> = {
   oathbreakers_dagger: "The Oathbreaker's Dagger",
 };
 
-/** Background/text classes for each item's block tile in the Inventory grid. */
-export const ITEM_BLOCK_COLORS: Record<ItemType, string> = {
-  common_chest: "bg-green-600 text-white",
-  rare_chest: "bg-blue-600 text-white",
-  exotic_chest: "bg-purple-600 text-white",
-  painting: "bg-amber-500 text-white",
-  sigil: "bg-indigo-600 text-white",
-  dagger: "bg-red-700 text-white",
-  bleeding_coin: "bg-gray-900 text-red-400",
-  forged_seal: "bg-indigo-400 text-white",
-  vault_ledger_lock: "bg-indigo-800 text-white",
-  auction_insurance_token: "bg-sky-600 text-white",
-  whispering_coin: "bg-sky-800 text-white",
-  tarnished_locket: "bg-amber-700 text-white",
-  chalk_marker: "bg-stone-500 text-white",
-  twin_faced_coin: "bg-yellow-500 text-black",
-  wardens_whistle: "bg-indigo-500 text-white",
-  phantom_bidder: "bg-sky-900 text-white",
-  street_rumor: "bg-stone-600 text-white",
-  dull_blade: "bg-red-400 text-white",
-  empty_frame: "bg-amber-200 text-amber-900",
-  bent_sigil: "bg-indigo-300 text-indigo-900",
-  weighted_dice: "bg-yellow-600 text-white",
-  gallery_deed: "bg-fuchsia-700 text-white",
-  watchers_token: "bg-teal-600 text-white",
-  brokers_monopoly: "bg-fuchsia-900 text-white",
-  pickpockets_glove: "bg-red-500 text-white",
-  grudge_ledger: "bg-red-900 text-white",
-  oathbreakers_dagger: "bg-red-800 text-white",
+export type ItemRarity = "common" | "rare" | "legendary";
+
+/**
+ * Every item type's rarity category. Mirrors the same three loot-odds
+ * bands used server-side in items/chest.ts (Common-band, Rare-band,
+ * Legendary), extended to cover the original pre-existing items too:
+ * Exotic Chest slots in as this game's "Legendary" tier (it's the top
+ * chest rarity), and Bleeding Coin -- a cursed item with no normal
+ * acquisition path -- is grouped with Legendary as the other
+ * exceptional/dangerous item.
+ */
+export const ITEM_RARITY: Record<ItemType, ItemRarity> = {
+  common_chest: "common",
+  painting: "common",
+  sigil: "common",
+  dagger: "common",
+  dull_blade: "common",
+  pickpockets_glove: "common",
+  bent_sigil: "common",
+  twin_faced_coin: "common",
+  weighted_dice: "common",
+  tarnished_locket: "common",
+  chalk_marker: "common",
+  street_rumor: "common",
+  empty_frame: "common",
+  wardens_whistle: "common",
+
+  rare_chest: "rare",
+  forged_seal: "rare",
+  vault_ledger_lock: "rare",
+  whispering_coin: "rare",
+  phantom_bidder: "rare",
+  watchers_token: "rare",
+  grudge_ledger: "rare",
+  oathbreakers_dagger: "rare",
+  auction_insurance_token: "rare",
+
+  exotic_chest: "legendary",
+  gallery_deed: "legendary",
+  brokers_monopoly: "legendary",
+  bleeding_coin: "legendary",
 };
+
+export const RARITY_LABELS: Record<ItemRarity, string> = {
+  common: "Common",
+  rare: "Rare",
+  legendary: "Legendary",
+};
+
+/** One color per rarity tier -- matches the Common Block/Rare Vault/Exotic Showcase palette used in the Auction Room. */
+export const RARITY_COLORS: Record<ItemRarity, string> = {
+  common: "bg-green-600 text-white",
+  rare: "bg-blue-600 text-white",
+  legendary: "bg-purple-700 text-white",
+};
+
+export const RARITY_ORDER: ItemRarity[] = ["common", "rare", "legendary"];
+
+/** Background/text classes for each item's block tile -- derived from its rarity, so every item in a tier shares one color. */
+export const ITEM_BLOCK_COLORS: Record<ItemType, string> = Object.fromEntries(
+  (Object.keys(ITEM_RARITY) as ItemType[]).map((itemType) => [itemType, RARITY_COLORS[ITEM_RARITY[itemType]]])
+) as Record<ItemType, string>;
