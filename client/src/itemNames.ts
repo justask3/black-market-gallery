@@ -84,7 +84,7 @@ export const RARITY_LABELS: Record<ItemRarity, string> = {
 export const RARITY_COLORS: Record<ItemRarity, string> = {
   common: "bg-green-600 text-white",
   rare: "bg-blue-600 text-white",
-  legendary: "bg-purple-700 text-white",
+  legendary: "bg-yellow-500 text-black",
 };
 
 export const RARITY_ORDER: ItemRarity[] = ["common", "rare", "legendary"];

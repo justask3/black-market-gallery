@@ -39,9 +39,10 @@ function evenlySplit(band: ItemType[], totalWeight: number): WeightedEntry[] {
  * Weighted-pool loot tables per chest rarity. Replaces the old fixed
  * gold/painting/sigil/dagger chance bands now that there are ~20 more
  * possible item outcomes -- a flat list of weighted entries scales to any
- * number of outcomes without nested if/else chains. Odds escalate with
- * tier: gold share drops, the existing painting/sigil/dagger pool and the
- * new item bands both grow, and Legendaries are Exotic-only.
+ * number of outcomes without nested if/else chains. Rarity is strictly
+ * gated and cumulative by tier: Common Chest only ever offers Common-band
+ * items, Rare Chest offers Common+Rare, and Exotic Chest -- the only tier
+ * that can drop a Legendary -- offers all three.
  */
 const LOOT_TABLES: Record<ChestTier, WeightedEntry[]> = {
   common: [
@@ -49,8 +50,7 @@ const LOOT_TABLES: Record<ChestTier, WeightedEntry[]> = {
     { weight: 10, kind: "item", itemType: "painting" },
     { weight: 5, kind: "item", itemType: "sigil" },
     { weight: 5, kind: "item", itemType: "dagger" },
-    ...evenlySplit(COMMON_BAND, 25),
-    ...evenlySplit(RARE_BAND, 5),
+    ...evenlySplit(COMMON_BAND, 30),
   ],
   rare: [
     { weight: 30, kind: "gold", min: 500, max: 8000 },

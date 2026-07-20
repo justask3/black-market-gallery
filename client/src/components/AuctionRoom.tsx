@@ -11,7 +11,7 @@ const TIER_ORDER: AuctionTierId[] = ["common", "rare", "exotic"];
 const TIER_STYLES: Record<AuctionTierId, { header: string; card: string }> = {
   common: { header: "bg-green-200 text-green-900", card: "bg-green-50 border-green-200" },
   rare: { header: "bg-blue-200 text-blue-900", card: "bg-blue-50 border-blue-200" },
-  exotic: { header: "bg-purple-200 text-purple-900", card: "bg-purple-50 border-purple-200" },
+  exotic: { header: "bg-yellow-200 text-yellow-900", card: "bg-yellow-50 border-yellow-200" },
 };
 
 function useCountdown(targetMs: number | null | undefined) {
